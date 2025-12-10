@@ -1,19 +1,19 @@
 import React, { useState, useRef } from 'react';
 import CodeEditor from './components/CodeEditor';
 import OutputPanel from './components/OutputPanel';
-import { SimpleTinyCInterpreter } from './interpreter/SimpleTinyCInterpreter';
+import { TinyCInterpreter } from './interpreter/TinyCInterpreter';
 import examples from './examples';
 import './App.css';
 // Force reload - v2.0.2
 
 function App() {
-  const [code, setCode] = useState(examples.hello.code);
+  const [code, setCode] = useState('');
   const [output, setOutput] = useState('');
   const [input, setInput] = useState('');
   const [isRunning, setIsRunning] = useState(false);
   const [error, setError] = useState('');
   const [showDocs, setShowDocs] = useState(false);
-  const [interpreter] = useState(() => new SimpleTinyCInterpreter());
+  const [interpreter] = useState(() => new TinyCInterpreter());
   const inputRef = useRef(null);
 
   const handleRun = () => {
@@ -71,23 +71,12 @@ function App() {
     setError('');
   };
 
-  const [currentExample, setCurrentExample] = useState('hello');
+  const [currentExample, setCurrentExample] = useState('');
   
-  const handleLoadExample = () => {
-    const exampleKeys = Object.keys(examples).filter(key => key !== 'trek');
-    const currentIndex = exampleKeys.indexOf(currentExample);
-    const nextIndex = (currentIndex + 1) % exampleKeys.length;
-    const nextKey = exampleKeys[nextIndex];
-    
-    setCode(examples[nextKey].code);
-    setCurrentExample(nextKey);
-    setOutput('');
-    setError('');
-  };
-  
-  const handleLoadTrek = () => {
-    setCode(examples.trek.code);
-    setCurrentExample('trek');
+  const handleExampleChange = (e) => {
+    const exampleKey = e.target.value;
+    setCode(examples[exampleKey].code);
+    setCurrentExample(exampleKey);
     setOutput('');
     setError('');
   };
@@ -108,12 +97,20 @@ function App() {
         <button className="btn btn-secondary" onClick={handleClear}>
           🗑️ Clear
         </button>
-        <button className="btn btn-secondary" onClick={handleLoadExample}>
-          📄 Next Example ({currentExample !== 'trek' ? examples[currentExample].title : 'Hello World'})
-        </button>
-        <button className="btn btn-trek" onClick={handleLoadTrek}>
-          🚀 Load Star Trek
-        </button>
+        <select 
+          className="example-select" 
+          value={currentExample} 
+          onChange={handleExampleChange}
+        >
+          <option value="" disabled>Load an Example</option>
+          <option value="trek">🚀 Star Trek Game</option>
+          <option value="hello">Hello World</option>
+          <option value="simple">Simple Print</option>
+          <option value="variables">Variables</option>
+          <option value="math">Math Operations</option>
+          <option value="interactive">Interactive Input</option>
+          <option value="countdown">Number Countdown</option>
+        </select>
         <button className="btn btn-secondary" onClick={() => setShowDocs(true)}>
           📖 Documentation
         </button>

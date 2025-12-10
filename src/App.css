@@ -77,16 +77,34 @@ body {
   transform: translateY(-2px);
 }
 
-.btn-trek {
-  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-  color: white;
-  font-weight: bold;
+.example-select {
+  padding: 10px 15px;
+  background: #3e3e42;
+  color: #d4d4d4;
+  border: 1px solid #555;
+  border-radius: 5px;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.3s ease;
+  min-width: 200px;
 }
 
-.btn-trek:hover {
-  background: linear-gradient(135deg, #7e8ff7 0%, #8e5bb8 100%);
-  transform: translateY(-2px);
-  box-shadow: 0 4px 8px rgba(102, 126, 234, 0.4);
+.example-select:hover {
+  background: #505053;
+  border-color: #667eea;
+}
+
+.example-select:focus {
+  outline: none;
+  border-color: #667eea;
+  box-shadow: 0 0 0 2px rgba(102, 126, 234, 0.3);
+}
+
+.example-select option {
+  background: #2d2d30;
+  color: #d4d4d4;
+  padding: 10px;
 }
 
 .error-panel {
