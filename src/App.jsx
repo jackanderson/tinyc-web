@@ -4,7 +4,7 @@ import OutputPanel from './components/OutputPanel';
 import { TinyCInterpreter } from './interpreter/TinyCInterpreter';
 import examples from './examples';
 import './App.css';
-// Force reload - v2.0.2
+// Force reload - v2.7.1 BUILD 20251210-1532 - RETURN FIX VERIFIED
 
 function App() {
   const [code, setCode] = useState('');
@@ -81,6 +81,34 @@ function App() {
     setError('');
   };
 
+  const handleLoadFile = (e) => {
+    const file = e.target.files[0];
+    if (file) {
+      const reader = new FileReader();
+      reader.onload = (event) => {
+        setCode(event.target.result);
+        setOutput('');
+        setError('');
+        setCurrentExample('');
+      };
+      reader.readAsText(file);
+    }
+    // Reset input so same file can be loaded again
+    e.target.value = '';
+  };
+
+  const handleSaveFile = () => {
+    const blob = new Blob([code], { type: 'text/plain' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'program.tc';
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  };
+
   return (
     <div className="app">
       <header className="app-header">
@@ -102,7 +130,7 @@ function App() {
           value={currentExample} 
           onChange={handleExampleChange}
         >
-          <option value="" disabled>Load an Example</option>
+          <option value="" disabled>Examples</option>
           <option value="trek">🚀 Star Trek Game</option>
           <option value="hello">Hello World</option>
           <option value="simple">Simple Print</option>
@@ -111,6 +139,18 @@ function App() {
           <option value="interactive">Interactive Input</option>
           <option value="countdown">Number Countdown</option>
         </select>
+        <label className="btn btn-secondary file-button">
+          📂 Load .tc
+          <input
+            type="file"
+            accept=".tc"
+            onChange={handleLoadFile}
+            style={{ display: 'none' }}
+          />
+        </label>
+        <button className="btn btn-secondary" onClick={handleSaveFile}>
+          💾 Save .tc
+        </button>
         <button className="btn btn-secondary" onClick={() => setShowDocs(true)}>
           📖 Documentation
         </button>

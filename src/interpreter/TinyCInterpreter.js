@@ -1,7 +1,7 @@
 // TinyCInterpreter.js - Simplified tiny-c interpreter for web
 // This runs tiny-c code by executing the standard library functions
-// Version: 2.3.1 - Fixed 32-bit integer arithmetic to prevent overflow
-console.log('=== TinyCInterpreter Version 2.3.1 LOADED - 32-BIT INT FIX ===');
+// Version: 2.7.11 - Debug random() return values for starbase generation - BUILD 20251210-1640
+console.log('=== TinyCInterpreter Version 2.7.11 LOADED - BUILD 20251210-1640 ===');
 
 export class TinyCInterpreter {
   constructor() {
@@ -33,6 +33,8 @@ export class TinyCInterpreter {
     this.loopState = null;  // Save loop state when waiting for input
     this.totalExecutedLines = 0;  // Track total lines executed to detect infinite loops
     this.executionStartTime = Date.now();  // Track execution time
+    this.halted = false;  // MC HALT flag
+    this.stack = [];  // Stack for MC operations
   }
   
   // Output functions
@@ -73,6 +75,171 @@ export class TinyCInterpreter {
   
   isWaitingForInput() {
     return this.waitingForInput;
+  }
+  
+  // Stack operations for MC functions
+  push(value) {
+    this.stack.push(value);
+  }
+  
+  pop() {
+    if (this.stack.length === 0) {
+      console.warn('Stack underflow - returning 0');
+      return 0;
+    }
+    return this.stack.pop();
+  }
+  
+  // Execute Machine Call (MC) - low-level system functions
+  executeMC(argCount) {
+    // MC constants from original tiny-c mc.c:
+    // 1=PUTC, 2=GETC, 3=OPEN, 4=READ, 5=WRITE, 6=CLOSE, 7=MOVEBL, 
+    // 8=COUNTCH, 9=SCANN, 10=HALT, 11=APPL, 12=CHRDY, 13=PUTBL, 
+    // 14=PUTN, 15=GETLN, 16=SETMEM, 17=BEEP
+    
+    // First pop the MC operation number from stack (like original mc.c)
+    const mcNumber = this.pop();
+    
+    // User-defined machine calls (>= 1000)
+    if (mcNumber >= 1000) {
+      console.log(`MC user-defined call ${mcNumber - 1000} with ${argCount} args`);
+      return;
+    }
+    
+    switch(mcNumber) {
+      case 1: { // PUTC - put character (output single char)
+        // Pop character code from stack and output it
+        const charCode = this.pop();
+        const char = charCode ? String.fromCharCode(charCode) : '"';
+        this.print(char);
+        this.push(charCode); // Return the char code
+        break;
+      }
+        
+      case 2: { // GETC - get character (read single char)
+        // Request character input from user
+        if (this.inputQueue.length === 0) {
+          this.requestInput('');
+          this.waitingForInput = true;
+        } else {
+          const input = this.getInput();
+          const charCode = input && input.length > 0 ? input.charCodeAt(0) : 0;
+          this.push(charCode);
+        }
+        break;
+      }
+        
+      case 3: { // OPEN - open file
+        // Pop: unit, size, name, mode
+        const unit = this.pop();
+        const size = this.pop();
+        const name = this.pop();
+        const mode = this.pop();
+        console.log(`MC OPEN - file operations not supported (unit=${unit}, mode=${mode})`);
+        this.push(-1); // Return error code
+        break;
+      }
+        
+      case 4: { // READ - read from file
+        const unit = this.pop();
+        const buffer = this.pop();
+        console.log(`MC READ - file operations not supported`);
+        this.push(-1); // Return error code
+        break;
+      }
+        
+      case 5: { // WRITE - write to file
+        const unit = this.pop();
+        const to = this.pop();
+        const from = this.pop();
+        console.log(`MC WRITE - file operations not supported`);
+        this.push(0); // Return 0
+        break;
+      }
+        
+      case 6: { // CLOSE - close file
+        const unit = this.pop();
+        console.log(`MC CLOSE - file operations not supported`);
+        this.push(0); // Return 0
+        break;
+      }
+        
+      case 10: { // HALT - stop execution
+        console.log('MC 10 (HALT) called - stopping execution');
+        console.log('Final output:', this.output);
+        this.halted = true;
+        break;
+      }
+        
+      case 12: { // CHRDY - check if character ready (keyboard ready)
+        // Check if input queue has data
+        const ready = this.inputQueue.length > 0 ? 1 : 0;
+        this.push(ready);
+        break;
+      }
+        
+      case 13: { // PUTBL - print block of text (string output)
+        // Pop two pointers (from, to) and print chars between them
+        // In web version without memory addresses, just print a newline
+        const to = this.pop();
+        const from = this.pop();
+        console.log('MC 13 (PUTBL) executing - outputting newline');
+        this.println();
+        console.log('Current output:', this.output);
+        this.push(0); // Return 0
+        break;
+      }
+        
+      case 14: { // PUTN - print number
+        // Pop an integer from stack and print it
+        const num = this.pop();
+        this.print(num.toString());
+        this.push(1); // Return number of chars printed (approximate)
+        break;
+      }
+        
+      case 15: { // GETLN - get line of input
+        // Get a full line of text input
+        if (this.inputQueue.length === 0) {
+          this.requestInput('');
+          this.waitingForInput = true;
+        } else {
+          const line = this.getInput();
+          // In original, this would store to buffer address from stack
+          const buffer = this.pop();
+          this.push(line ? line.length : 0); // Return length
+        }
+        break;
+      }
+        
+      case 16: { // SETMEM - set memory
+        const ch = this.pop();
+        const n = this.pop();
+        const start = this.pop();
+        console.log(`MC SETMEM - memory operations not fully supported`);
+        this.push(0);
+        break;
+      }
+        
+      case 17: { // BEEP - make a beep sound
+        const duration = this.pop();
+        const frequency = this.pop();
+        console.log(`MC BEEP - sound not supported in browser (freq=${frequency}, dur=${duration})`);
+        this.push(0);
+        break;
+      }
+        
+      default: {
+        // Pop any arguments that were supposed to be on the stack
+        // Note: argCount includes the MC number itself, so we already popped 1
+        for (let i = 1; i < argCount; i++) {
+          this.pop();
+        }
+        console.log(`MC ${mcNumber} with ${argCount} args - not implemented (args discarded)`);
+        // Push a default return value
+        this.push(0);
+      }
+    }
   }
   
   // Execute a tiny-c program
@@ -191,6 +358,12 @@ export class TinyCInterpreter {
   
   // Continue execution from where we left off
   continueExecution() {
+    // Check if execution was halted by MC HALT
+    if (this.halted) {
+      console.log('Execution halted by MC HALT');
+      return this.getOutput();
+    }
+    
     // Reset execution timer when continuing after input
     this.executionStartTime = Date.now();
     
@@ -218,7 +391,7 @@ export class TinyCInterpreter {
         
         const trimmed = this.lines[i].trim();
         
-        // Skip comments and empty lines
+        // Skip comments, empty lines
         if (trimmed.startsWith('/*') || trimmed.startsWith('//') || trimmed === '' || trimmed === ']') {
           this.lineIndex++;
           continue;
@@ -297,11 +470,6 @@ export class TinyCInterpreter {
       console.log('Executed', this.totalExecutedLines, 'lines in', elapsed, 'ms', '- Line', this.lineIndex, ':', this.lines[this.lineIndex]?.substring(0, 50));
     }
     
-    // Skip MC (machine code) commands
-    if (line.startsWith('MC ')) {
-      return false;
-    }
-    
     // Handle multiple statements on one line separated by semicolons
     // BUT: Don't split for/while/if statements which have semicolons in their syntax
     if (line.includes(';') && !line.includes('"') && !line.match(/^(for|while|if)\s*\(/)) {
@@ -340,6 +508,13 @@ export class TinyCInterpreter {
       return false;
     }
     
+    // Check for standalone increment/decrement (e.g., ++i, i++, --i, i--)
+    if (line.match(/^(\+\+|--)\w+$/) || line.match(/^\w+(\+\+|--)$/)) {
+      // Just evaluate it - evaluateExpression handles the increment
+      this.evaluateExpression(line);
+      return false;
+    }
+    
     // Check for if statement
     if (line.match(/^if\s*\(/)) {
       return this.executeIf(line);
@@ -350,8 +525,9 @@ export class TinyCInterpreter {
       return this.executeWhile(line);
     }
     
-    // Check for do-while loop
+    // Check for do-while loop  
     if (line.startsWith('do ') || line === 'do [') {
+      console.log('[executeLine] Detected do-while at line', this.lineIndex, ':', line);
       return this.executeDo(line);
     }
     
@@ -374,6 +550,21 @@ export class TinyCInterpreter {
         this.println();
       }
       return false;
+    }
+    
+    // Handle MC (Machine Call) - Machine calls from original tiny-c
+    if (line.trim().startsWith('MC ')) {
+      const match = line.match(/MC\s+(\d+),(\d+)/);
+      if (match) {
+        const value = parseInt(match[1]);
+        const argCount = parseInt(match[2]);
+        // In tiny-c: MC pushes a value, then the argCount determines what MC operation to perform
+        // argCount is actually the MC operation code!
+        // The value is pushed as data
+        this.push(value);
+        this.executeMC(argCount);
+      }
+      return false; // MC operations are synchronous, don't wait
     }
     
     if (line.startsWith('ps ')) {
@@ -405,12 +596,24 @@ export class TinyCInterpreter {
       return false;
     }
     
-    // Variable or array assignment
-    const assignMatch = line.match(/^(\w+)(?:\s*\((\d+)\))?\s*=\s*(.+)/);
+    // Variable or array assignment (allow leading whitespace)
+    const assignMatch = line.match(/^\s*(\w+)(?:\s*\((\d+)\))?\s*=\s*(.+)/);
+    
+    // DEBUG: ULTRA-VERBOSE - Log EVERY line that starts with 'j'
+    const trimmedLine = line.trim();
+    if (trimmedLine.charAt(0) === 'j') {
+      console.log(`[J-ANY] line="${trimmedLine}", char1="${trimmedLine.charAt(1)}", assignMatch=${assignMatch ? 'YES' : 'NO'}`);
+    }
+    
     if (assignMatch) {
       const varName = assignMatch[1];
       const arrayIndex = assignMatch[2];
       const expr = assignMatch[3];
+      
+      // Debug: log when we match j assignment
+      if (varName === 'j') {
+        console.log(`[ASSIGN-MATCH] Found j assignment: line="${line}", expr="${expr}"`);
+      }
       
       // Check for getnum
       const getnumMatch = expr.match(/getnum\("([^"]*)"\)/);
@@ -488,14 +691,24 @@ export class TinyCInterpreter {
         } else {
           this.variables[varName] = value;
         }
-        console.log(`Chained assignment: ${varName} = ${innerVar} = ${value}`);
         return false;
       }
       
       // Regular assignment
+      // Debug logging for j assignment BEFORE evaluation
+      if (varName === 'j') {
+        console.log(`[ASSIGNMENT-BEFORE] Assigning to j, expr="${expr}", contains random: ${expr.includes('random')}`);
+      }
+      
       let value = this.evaluateExpression(expr);
       // Ensure 32-bit integer
       value = (value | 0);
+      
+      // Debug logging for j assignment (galaxy creation) AFTER evaluation
+      if (varName === 'j') {
+        console.log(`[ASSIGNMENT-AFTER] j = ${expr} => evaluated to ${value}, seed=${this.variables.seed}`);
+      }
+      
       if (arrayIndex !== undefined) {
         this.arrays[varName][parseInt(arrayIndex)] = value;
       } else {
@@ -515,13 +728,13 @@ export class TinyCInterpreter {
     const funcName = match[1];
     const argsStr = match[2];
     
-    // Built-in functions
+    // Built-in functions (only if not user-defined)
     if (funcName === 'version') {
       return false; // Returns 7
     }
     
-    if (funcName === 'random') {
-      // Called but not assigned - just execute
+    if (funcName === 'random' && !this.functions['random']) {
+      // Called but not assigned - just execute built-in only if no user-defined version
       const args = argsStr.split(',').map(a => this.evaluateExpression(a.trim()));
       this.randomFunc(args[0] || 100);
       return false;
@@ -664,10 +877,18 @@ export class TinyCInterpreter {
     
     // Execute until end of function or waiting for input
     while (this.lineIndex <= func.endLine) {
+      // Check if execution was halted
+      if (this.halted) {
+        console.log('Function execution stopped - halted flag set');
+        break;
+      }
+      
       const line = this.lines[this.lineIndex];
       
       const trimmed = line.trim();
-      if (trimmed === '' || trimmed.startsWith('/*')) {
+      
+      // Skip comments, empty lines, and closing brackets
+      if (trimmed === '' || trimmed.startsWith('/*') || trimmed.startsWith('//')) {
         this.lineIndex++;
         continue;
       }
@@ -682,12 +903,13 @@ export class TinyCInterpreter {
         return true;
       }
       
-      // Only increment after successful execution
-      this.lineIndex++;
-      
+      // Check for return/break/continue BEFORE incrementing
       if (this.shouldReturn) {
         break;
       }
+      
+      // Only increment after successful execution
+      this.lineIndex++;
     }
     
     // Finished function - restore previous context if any
@@ -696,6 +918,7 @@ export class TinyCInterpreter {
       this.currentFunction = prevContext.functionName;
       this.lineIndex = prevContext.lineIndex;
       this.inFunction = true;
+      // DO NOT increment lineIndex here - the caller's loop will handle it
     } else {
       this.currentFunction = null;
       this.inFunction = false;
@@ -856,6 +1079,11 @@ export class TinyCInterpreter {
       this.executeUserFunction(funcName, args);
       const result = this.returnValue || 0;
       
+      // Debug logging for random function
+      if (funcName === 'random' && depth < 2) {
+        console.log(`random(${args[0]}) returned ${result}, seed now: ${this.variables.seed}`);
+      }
+      
       // Restore context
       this.lineIndex = savedLineIndex;
       this.currentFunction = savedCurrentFunction;
@@ -902,6 +1130,10 @@ export class TinyCInterpreter {
         // Simulate 32-bit signed integer arithmetic (to prevent overflow issues)
         if (typeof result === 'number' && !Number.isNaN(result) && Number.isFinite(result)) {
           result = (result | 0); // Convert to 32-bit signed integer
+        }
+        // Debug: log comparison results involving < 5 or < 99
+        if (depth === 0 && (processed.includes('< 5') || processed.includes('< 99'))) {
+          console.log(`[EVAL] "${processed}" => ${result}`);
         }
         return result;
       }
@@ -1437,12 +1669,57 @@ export class TinyCInterpreter {
   
   // Execute do-while loop
   executeDo(line) {
-    const loopStart = this.lineIndex;
-    const loopEnd = this.findClosingBracket(this.lineIndex);
+    const bodyStart = this.lineIndex;
+    const bodyEnd = this.findClosingBracket(this.lineIndex);
     
-    console.log('Do-while: start line', loopStart, 'end line', loopEnd);
-    console.log('  Start:', this.lines[loopStart]);
-    console.log('  End:', this.lines[loopEnd]);
+    // CRITICAL: Find the "while (condition)" - it's often on the same line as ]
+    let condition = null;
+    let whileLineIndex = bodyEnd;
+    
+    // First check if the closing bracket line has "while" on it
+    const closingLine = this.lines[bodyEnd].trim();
+    console.log('[DO-WHILE] Closing bracket line', bodyEnd, ':', closingLine);
+    
+    if (closingLine.includes('while')) {
+      const whileIndex = closingLine.indexOf('while');
+      const rest = closingLine.substring(whileIndex);
+      const whileMatch = rest.match(/^while\s*\((.+)\)/);
+      if (whileMatch) {
+        condition = whileMatch[1];
+        console.log('[DO-WHILE] Found condition on bracket line:', condition);
+      }
+    }
+    
+    // If not found, check the next line
+    if (!condition) {
+      whileLineIndex = bodyEnd + 1;
+      while (whileLineIndex < this.lines.length) {
+        const whileLine = this.lines[whileLineIndex].trim();
+        if (whileLine === '' || whileLine.startsWith('/*')) {
+          whileLineIndex++;
+          continue;
+        }
+        
+        const whileMatch = whileLine.match(/^while\s*\((.+)\)/);
+        if (whileMatch) {
+          condition = whileMatch[1];
+          console.log('[DO-WHILE] Found condition at line', whileLineIndex, ':', condition);
+          break;
+        }
+        
+        break; // Stop if we hit non-whitespace that's not "while"
+      }
+    }
+    
+    if (!condition) {
+      console.error('[DO-WHILE] Could not find while condition after do block!');
+      console.error('Body end line', bodyEnd, ':', this.lines[bodyEnd]);
+      console.error('Next line', bodyEnd + 1, ':', this.lines[bodyEnd + 1]);
+      this.lineIndex = bodyEnd + 1;
+      return false;
+    }
+    
+    console.log('Do-while: body lines', bodyStart, '-', bodyEnd, 'condition:', condition);
     
     const savedInLoop = this.inLoop;
     this.inLoop = true;
@@ -1450,74 +1727,37 @@ export class TinyCInterpreter {
     let iterations = 0;
     let continueLoop = true;
     
+    // This matches the C code: FOREVER { st(); check condition; if true goto repeat }
     while (continueLoop) {
       iterations++;
-      // Only log at significant milestones
-      if (iterations === 1000 || iterations === 5000 || iterations === 10000) {
-        console.log('Do-while iteration', iterations);
+      if (iterations <= 5 || iterations % 10 === 0) {
+        console.log('Do-while iteration', iterations, '- Variables: k=', this.variables.k, 'b=', this.variables.b, 'j=', this.variables.j, 'i=', this.variables.i, 'm=', this.variables.m, 'seed=', this.variables.seed);
       }
-      if (iterations > 10000) {
-        console.error('Do-while loop exceeded 10000 iterations - breaking');
-        console.error('Variables: k=', this.variables.k, 'b=', this.variables.b, 'i=', this.variables.i);
-        console.error('Line:', this.lineIndex, '-', this.lines[this.lineIndex]);
+      if (iterations > 1000) {
+        console.error('Do-while loop exceeded 1000 iterations - BREAKING');
+        console.error('Final values: k=', this.variables.k, 'b=', this.variables.b);
         break;
       }
       
-      this.lineIndex = loopStart;
+      // Execute loop body from bodyStart to bodyEnd
+      this.lineIndex = bodyStart;
       this.shouldBreak = false;
       this.shouldContinue = false;
       
-      // Execute loop body
-      while (this.lineIndex <= loopEnd) {
+      while (this.lineIndex <= bodyEnd) {
         const currentLine = this.lines[this.lineIndex];
         this.lineIndex++;
         
         const trimmed = currentLine.trim();
-        if (trimmed === '' || trimmed.startsWith('/*') || trimmed === '[') continue;
-        
-        // Check for ] while (condition) pattern
-        if (trimmed.startsWith(']') && trimmed.includes('while')) {
-          // Extract condition with proper parenthesis matching
-          console.log('[executeDo] Do-while end:', trimmed);
-          const whileIndex = trimmed.indexOf('while');
-          const openParen = trimmed.indexOf('(', whileIndex);
-          
-          if (openParen !== -1) {
-            let parenDepth = 1; // Start at 1 since we found the opening paren
-            let condEnd = -1;
-            
-            for (let i = openParen + 1; i < trimmed.length; i++) {
-              if (trimmed[i] === '(') {
-                parenDepth++;
-              } else if (trimmed[i] === ')') {
-                parenDepth--;
-                if (parenDepth === 0) {
-                  condEnd = i;
-                  break;
-                }
-              }
-            }
-            
-            if (condEnd !== -1) {
-              const condition = trimmed.substring(openParen + 1, condEnd);
-              console.log('[executeDo] Extracted:', condition);
-              continueLoop = this.evaluateCondition(condition);
-              console.log('Do-while condition:', condition, '=', continueLoop);
-            }
-          }
-          break;
-        }
-        
-        if (trimmed === ']') continue;
+        if (trimmed === '' || trimmed.startsWith('/*') || trimmed === '[' || trimmed === ']') continue;
         
         const shouldWait = this.executeLine(trimmed);
         if (shouldWait) {
-          // Save do-while loop state for resumption
-          console.log('Do-while: Waiting for input, saving state at lineIndex', this.lineIndex);
           this.loopState = {
             type: 'do-while',
-            loopStart: loopStart,
-            loopEnd: loopEnd,
+            bodyStart: bodyStart,
+            bodyEnd: bodyEnd,
+            condition: condition,
             iterations: iterations,
             savedInLoop: savedInLoop
           };
@@ -1536,9 +1776,14 @@ export class TinyCInterpreter {
       }
       
       if (this.shouldBreak) break;
+      
+      // Now evaluate the condition (like the C code does after st())
+      continueLoop = this.evaluateCondition(condition);
+      console.log('Do-while condition:', condition, '=', continueLoop);
     }
     
-    this.lineIndex = loopEnd;
+    // Jump past the while line
+    this.lineIndex = whileLineIndex + 1;
     this.shouldBreak = false;
     this.inLoop = savedInLoop;
     return false;
@@ -1553,6 +1798,12 @@ export class TinyCInterpreter {
     const condition = match[2].trim();
     const increment = match[3].trim();
     const hasBracket = match[4] === '[';
+    
+    // Debug: detect galaxy for loop
+    const isGalaxyLoop = condition.includes('63');
+    if (isGalaxyLoop) {
+      console.log(`[FOR-GALAXY] Starting galaxy for loop`);
+    }
     
     // Execute initialization
     if (init) {
@@ -1615,7 +1866,6 @@ export class TinyCInterpreter {
       
       // Execute increment
       if (increment) {
-        console.log('Executing increment:', increment);
         this.executeLine(increment);
       }
       

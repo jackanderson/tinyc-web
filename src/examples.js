@@ -112,12 +112,18 @@ pl ""
 
 n = getnum("Enter a number to count down from:")
 
-ps "Counting down from"
+ps "Counting down from "
 pn n
 pl "..."
 pl ""
 
-pl "Done! (Full loop support coming soon)"
+while (n > 0) [
+  pn n
+  n = n - 1
+]
+
+pl ""
+pl "Blast off! 🚀"
 `
   },
   
