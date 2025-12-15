@@ -112,26 +112,28 @@ function App() {
   return (
     <div className="app">
       <header className="app-header">
-        <h1>🚀 Tiny-C Web Interpreter</h1>
-        <p className="subtitle">
-          A JavaScript port of the classic tiny-c interpreter by Scott B. Guthery
-        </p>
+        <div className="header-left">
+          <h1>tinyc-web</h1>
+        </div>
+        <div className="header-right">
+          tiny-c interpreter
+        </div>
       </header>
       
       <div className="toolbar">
         <button className="btn btn-primary" onClick={handleRun}>
-          ▶️ Run
+          Run
         </button>
         <button className="btn btn-secondary" onClick={handleClear}>
-          🗑️ Clear
+          Clear
         </button>
         <select 
           className="example-select" 
           value={currentExample} 
           onChange={handleExampleChange}
         >
-          <option value="" disabled>Examples</option>
-          <option value="trek">🚀 Star Trek Game</option>
+          <option value="" disabled>Load example</option>
+          <option value="trek">Star Trek Game</option>
           <option value="hello">Hello World</option>
           <option value="simple">Simple Print</option>
           <option value="variables">Variables</option>
@@ -140,7 +142,7 @@ function App() {
           <option value="countdown">Number Countdown</option>
         </select>
         <label className="btn btn-secondary file-button">
-          📂 Load .tc
+          Load .tc
           <input
             type="file"
             accept=".tc"
@@ -149,10 +151,10 @@ function App() {
           />
         </label>
         <button className="btn btn-secondary" onClick={handleSaveFile}>
-          💾 Save .tc
+          Save .tc
         </button>
         <button className="btn btn-secondary" onClick={() => setShowDocs(true)}>
-          📖 Documentation
+          Docs
         </button>
       </div>
       
