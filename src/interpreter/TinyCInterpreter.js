@@ -368,21 +368,23 @@ export class TinyCInterpreter {
     this.executionStartTime = Date.now();
     
     try {
-      // If we have a saved loop state, resume the loop
-      if (this.loopState) {
-        const shouldWait = this.resumeLoop();
-        if (shouldWait) {
-          return this.getOutput();
-        }
-        this.loopState = null;
-      }
-      
-      // If we're in a function, continue executing it
+      // IMPORTANT: If we're in a function, continue executing it FIRST
+      // This handles the case where a loop inside a function is waiting for input
       if (this.currentFunction) {
         const shouldWait = this.executeUserFunction(this.currentFunction);
         if (shouldWait) {
           return this.getOutput();
         }
+        // Function completed, clear loop state if any
+        this.loopState = null;
+      }
+      // If we have a saved loop state (and we're NOT in a function), resume the loop
+      else if (this.loopState) {
+        const shouldWait = this.resumeLoop();
+        if (shouldWait) {
+          return this.getOutput();
+        }
+        this.loopState = null;
       }
       
       // Continue from where we left off
@@ -828,6 +830,8 @@ export class TinyCInterpreter {
     const func = this.functions[funcName];
     if (!func) return false;
     
+    console.log('[executeUserFunction] Executing', funcName, 'from lineIndex', this.lineIndex, 'loopState:', this.loopState ? 'exists' : 'none');
+    
     // If we're not already in this function, set it up
     if (this.currentFunction !== funcName) {
       // Save current execution context if we're in a function
@@ -900,6 +904,7 @@ export class TinyCInterpreter {
       const shouldWait = this.executeLine(trimmed);
       if (shouldWait) {
         // Waiting for input - will resume here WITHOUT incrementing lineIndex
+        console.log('[executeUserFunction] Waiting for input at lineIndex', this.lineIndex, 'line:', trimmed);
         return true;
       }
       
@@ -1151,13 +1156,21 @@ export class TinyCInterpreter {
   // Find matching closing bracket
   findClosingBracket(startLine) {
     let depth = 0;
+    console.log('[findClosingBracket] Starting at line', startLine, ':', this.lines[startLine]);
     for (let i = startLine; i < this.lines.length; i++) {
       const line = this.lines[i];
       for (const char of line) {
-        if (char === '[') depth++;
+        if (char === '[') {
+          depth++;
+          console.log('[findClosingBracket] Line', i, 'found [, depth now', depth);
+        }
         if (char === ']') {
           depth--;
-          if (depth === 0) return i;
+          console.log('[findClosingBracket] Line', i, 'found ], depth now', depth);
+          if (depth === 0) {
+            console.log('[findClosingBracket] Returning line', i);
+            return i;
+          }
         }
       }
     }
@@ -1607,6 +1620,60 @@ export class TinyCInterpreter {
     this.inLoop = true;
     
     let iterations = 0;
+    
+    // Check if we're resuming an existing while loop
+    if (this.loopState && this.loopState.type === 'while') {
+      console.log('Resuming while loop from saved state, iteration', this.loopState.iterations, 'lineIndex', this.lineIndex);
+      // We're resuming - continue executing from current lineIndex within the loop
+      iterations = this.loopState.iterations;
+      const savedLoopStart = this.loopState.loopStart;
+      const savedLoopEnd = this.loopState.loopEnd;
+      const savedCondition = this.loopState.condition;
+      this.loopState = null; // Clear the state since we're handling it now
+      
+      // Continue executing from current lineIndex (which is where we waited)
+      while (this.lineIndex <= savedLoopEnd) {
+        const lineText = this.lines[this.lineIndex];
+        this.lineIndex++;
+        
+        const trimmed = lineText.trim();
+        if (trimmed === '' || trimmed.startsWith('/*') || trimmed === '[' || trimmed === ']') continue;
+        
+        const shouldWait = this.executeLine(trimmed);
+        
+        if (shouldWait) {
+          // Still waiting - save state again
+          this.loopState = {
+            type: 'while',
+            condition: savedCondition,
+            loopStart: savedLoopStart,
+            loopEnd: savedLoopEnd,
+            iterations: iterations,
+            savedInLoop: savedInLoop
+          };
+          this.inLoop = savedInLoop;
+          return true;
+        }
+        if (this.shouldReturn) {
+          this.lineIndex = savedLoopEnd;
+          this.inLoop = savedInLoop;
+          return false;
+        }
+        if (this.shouldBreak) break;
+        if (this.shouldContinue) break;
+      }
+      
+      if (this.shouldBreak) {
+        this.lineIndex = savedLoopEnd;
+        this.shouldBreak = false;
+        this.inLoop = savedInLoop;
+        return false;
+      }
+      
+      // Completed one iteration after resuming, now continue with normal while loop
+      iterations++;
+    }
+    
     let conditionResult = this.evaluateCondition(condition);
     while (conditionResult) {
       iterations++;
