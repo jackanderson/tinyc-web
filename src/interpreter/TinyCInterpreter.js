@@ -36,6 +36,9 @@ export class TinyCInterpreter {
     this.halted = false;  // MC HALT flag
     this.stack = [];  // Stack for MC operations
     this.audioContext = null;  // Web Audio context for beep sounds
+    this.errorCode = 0;  // Error code like original TinyC
+    this.errorFunction = null;  // Function name that caused error
+    this.errorLine = -1;  // Line number where error occurred
   }
   
   // Output functions
@@ -1362,6 +1365,9 @@ export class TinyCInterpreter {
     if (this.functions[funcName]) {
       // Note: arguments should have been parsed already in handleStatement
       this.executeUserFunction(funcName, []);
+    } else {
+      // Function not found - handle like original TinyC
+      this.handleUndefinedFunction(funcName);
     }
     
     return false;
@@ -1369,7 +1375,10 @@ export class TinyCInterpreter {
   
   executeUserFunction(funcName, args = []) {
     const func = this.functions[funcName];
-    if (!func) return false;
+    if (!func) {
+      this.handleUndefinedFunction(funcName);
+      return false;
+    }
     
     console.log('[executeUserFunction] Executing', funcName, 'from lineIndex', this.lineIndex, 'loopState:', this.loopState ? 'exists' : 'none');
     
@@ -1471,6 +1480,22 @@ export class TinyCInterpreter {
     }
     this.shouldReturn = false;
     return false;
+  }
+
+  // Handle undefined function calls like original TinyC
+  handleUndefinedFunction(funcName) {
+    // Set error code 3 (SYMBOLERR) like original TinyC
+    this.errorCode = 3;
+    this.errorFunction = funcName;
+    this.errorLine = this.lineIndex;
+    
+    // Print error message like original TinyC
+    const errorMsg = `Error 3\nUndefined function: ${funcName} at line ${this.lineIndex + 1}`;
+    console.error(errorMsg);
+    this.println(`\nError 3: Undefined function '${funcName}'`);
+    
+    // Don't halt immediately - let execution continue like original TinyC
+    // The error flag will be checked later
   }
   
   randomFunc(range) {
@@ -1602,6 +1627,18 @@ export class TinyCInterpreter {
           funcName: funcName,
           argsStr: argsStr
         });
+      } else {
+        // Check if it's a builtin function, if not, it's undefined
+        const builtins = ['random', 'version', 'abs', 'strlen', 'alphanum', 'chrdy', 
+                         'putchar', 'getchar', 'ps', 'pl', 'pn', 'gs', 'gn', 'beep',
+                         'cls', 'sak', 'exit', 'tolower', 'toupper', 'strcat', 'strcpy'];
+        if (!builtins.includes(funcName)) {
+          this.handleUndefinedFunction(funcName);
+          // Replace with 0 to continue expression evaluation
+          processed = processed.substring(0, funcMatch.index) + '0' + processed.substring(funcMatch.index + funcMatch[0].length);
+          // Reset regex after modification
+          funcCallPattern.lastIndex = 0;
+        }
       }
     }
     
