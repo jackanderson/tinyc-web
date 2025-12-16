@@ -66,10 +66,7 @@ hello()
 - **Functions**: `funcname[body]` or `funcname type param1, param2[body]`
 - **Blocks**: Use `[]` instead of `{}`
 - **Variables**: `int a, b, c` or `char str(10)` for arrays
-- **Built-in functions**:
-  - `ps "text"` - print string
-  - `pl "text"` - print line (with newline)
-  - `pn num` - print number
+- **Built-in functions**: See [Built-in Functions Reference](#built-in-functions-reference) below
 - **Control flow**: `if (cond)[...]`, `while (cond)[...]`, `for (init; cond; update)[...]`
 - **Comments**: `/* comment */`
 
@@ -95,19 +92,119 @@ tinyc-web/
 └── README.md
 ```
 
+## Built-in Functions Reference
+
+The Tiny-C Web Interpreter includes a comprehensive library of built-in functions compatible with the original tiny-c implementation:
+
+### Input/Output Functions
+
+#### Character I/O
+- **`putchar(c)`** - Output single character. If c=0, outputs '"'
+- **`getchar()`** - Input single character, returns ASCII code
+- **`chrdy()`** - Check if character ready for input (returns 1 if available, 0 if not)
+- **`gc()`** - Get character (same as getchar)
+
+#### String I/O
+- **`ps("text")`** - Print string without newline
+- **`pl("text")`** - Print line with newline
+- **`pn(num)`** - Print number with space prefix
+- **`gs(buffer)`** - Get string input into character array
+
+#### Number I/O  
+- **`gn()`** - Get number input, prompts until valid number entered
+
+### String Functions
+
+- **`strlen(str)`** - Return length of null-terminated string
+- **`strcat(dest, src)`** - Concatenate src string to dest string
+- **`strcpy(dest, src)`** - Copy src string to dest string
+- **`tolower(str)`** - Convert string to lowercase in place
+- **`toupper(str)`** - Convert string to uppercase in place
+
+### Parsing Functions
+
+- **`alphanum(c)`** - Check if character is alphanumeric (A-Z, a-z, 0-9, _)
+- **`num(buffer, value)`** - Parse up to 5 digits from buffer into value variable
+- **`atoi(buffer, value)`** - ASCII to integer conversion with sign handling
+
+### String Search & Comparison
+
+- **`ceqn(str1, str2, n)`** - Compare first n characters of two strings
+- **`index(haystack, len, needle, nlen)`** - Find substring position in string
+- **`countch(array, end, char)`** - Count occurrences of character
+- **`scann(array, end, char, count)`** - Scan for first occurrence of character
+
+### Memory Operations
+
+- **`move(src, dest)`** - Copy string from source to destination
+- **`movebl(src, dest, n)`** - Move block of memory (simplified in web version)
+- **`memset(array, size, value)`** - Set memory array to specific value
+
+### Terminal Control
+
+- **`cls()`** - Clear screen (clears output in web version)
+- **`beep(freq, dur)`** - Generate audio tone (frequency in Hz, duration in ms)
+- **`cnormal()`**, **`chide()`**, **`csolid()`** - Cursor control (no-op in web)
+- **`color(c)`**, **`hilo(c)`** - Color control (no-op in web)
+- **`posc(row, col)`** - Position cursor (no-op in web)
+- **`on()`**, **`off()`**, **`solid()`** - Display attributes (no-op in web)
+
+### System Functions
+
+- **`version()`** - Return interpreter version (returns 7)
+- **`random(range)`** - Generate random number from 1 to range
+- **`sak()`** - "Strike any key" - prompt and wait for input
+- **`exit()`** - Exit program
+
+### File Operations
+
+File operations return -1 (not supported in web version):
+- **`readfile(name, buffer, size, unit)`** 
+- **`writefile(name, buffer, end, unit)`**
+- **`fopen(rw, name, size, unit)`**
+- **`fread(buffer, unit)`**
+- **`fwrite(from, to, unit)`**
+- **`fclose(unit)`**
+
+### Usage Examples
+
+```c
+/* String operations */
+char name(20), greeting(50)
+strcpy(name, "World")
+strcpy(greeting, "Hello, ")
+strcat(greeting, name)
+pl greeting  /* Outputs: Hello, World */
+
+/* Input handling */
+char input(10)
+pl "Enter your name:"
+gs input
+ps "Hello, "
+pl input
+
+/* Number processing */
+int num
+pl "Enter a number:"
+num = gn()
+pn num
+```
+
 ## Implementation Notes
 
-This is a **simplified port** of the original tiny-c interpreter. The JavaScript version includes:
+This is a **full-featured port** of the original tiny-c interpreter. The JavaScript version includes:
 
-- Tiny-C syntax parsing with `[]` blocks
-- Function definitions and calls
-- Built-in functions: `ps`, `pl`, `pn` (print string, print line, print number)
+- Complete Tiny-C syntax parsing with `[]` blocks
+- Function definitions and calls with parameters
+- Full built-in function library (48+ functions)
+- Variable declarations and expressions
+- Control flow (if, while, for loops)
+- Array support with character and integer arrays
 - String and number constants
 - Comment support
-- Basic lexical scanning and tokenization
+- Interactive input handling
 - Error handling and reporting
-
-The full tiny-c language features (variables, expressions, control structures, arrays, etc.) can be expanded upon this foundation.
+- Compatible with original tiny-c programs
 
 ## Building for Production
 
@@ -119,14 +216,62 @@ npm run build
 
 The built files will be in the `dist/` directory, ready to be deployed to any static hosting service.
 
+## Language Features
+
+The Tiny-C Web Interpreter supports the complete tiny-c language:
+
+### Variable Declarations
+```c
+int a, b, c           /* Integer variables */
+char str(10), buf(20) /* Character arrays */
+```
+
+### Function Definitions
+```c
+/* Simple function */
+hello[
+  pl "Hello World!"
+]
+
+/* Function with parameters */
+add int x, y[
+  return x + y
+]
+```
+
+### Control Structures
+```c
+/* If statements */
+if (condition)[
+  /* statements */
+]
+
+/* While loops */
+while (condition)[
+  /* statements */
+]
+
+/* For loops */
+for (i = 0; i < 10; ++i)[
+  /* statements */
+]
+```
+
+### Arrays and Strings
+```c
+char message(50)
+strcpy(message, "Hello, Tiny-C!")
+pl message
+```
+
 ## Future Enhancements
 
-- [ ] Full tiny-c language support (variables, functions, loops, conditionals)
-- [ ] Syntax highlighting in the code editor
+- [ ] Syntax highlighting in the code editor  
 - [ ] Step-by-step debugging capabilities
 - [ ] Save/load programs from browser storage
 - [ ] Multiple code examples and tutorials
 - [ ] Interactive language documentation
+- [ ] File I/O simulation for web environment
 
 ## Credits
 

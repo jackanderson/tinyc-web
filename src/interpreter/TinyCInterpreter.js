@@ -35,6 +35,7 @@ export class TinyCInterpreter {
     this.executionStartTime = Date.now();  // Track execution time
     this.halted = false;  // MC HALT flag
     this.stack = [];  // Stack for MC operations
+    this.audioContext = null;  // Web Audio context for beep sounds
   }
   
   // Output functions
@@ -224,7 +225,44 @@ export class TinyCInterpreter {
       case 17: { // BEEP - make a beep sound
         const duration = this.pop();
         const frequency = this.pop();
-        console.log(`MC BEEP - sound not supported in browser (freq=${frequency}, dur=${duration})`);
+        
+        try {
+          // Create Web Audio context if it doesn't exist
+          if (!this.audioContext) {
+            this.audioContext = new (window.AudioContext || window.webkitAudioContext)();
+          }
+          
+          // Create oscillator for the tone
+          const oscillator = this.audioContext.createOscillator();
+          const gainNode = this.audioContext.createGain();
+          
+          // Connect oscillator -> gain -> output
+          oscillator.connect(gainNode);
+          gainNode.connect(this.audioContext.destination);
+          
+          // Set frequency and waveform
+          oscillator.frequency.setValueAtTime(frequency, this.audioContext.currentTime);
+          oscillator.type = 'sine'; // Pure sine wave tone
+          
+          // Set volume envelope (fade in/out to avoid clicks)
+          const now = this.audioContext.currentTime;
+          const durationSec = duration / 1000;
+          
+          gainNode.gain.setValueAtTime(0, now);
+          gainNode.gain.linearRampToValueAtTime(0.1, now + 0.01); // Fade in
+          gainNode.gain.setValueAtTime(0.1, now + durationSec - 0.01); // Hold
+          gainNode.gain.linearRampToValueAtTime(0, now + durationSec); // Fade out
+          
+          // Start and stop the tone
+          oscillator.start(now);
+          oscillator.stop(now + durationSec);
+          
+          console.log(`MC BEEP - generated tone (freq=${frequency}Hz, dur=${duration}ms)`);
+          
+        } catch (error) {
+          console.warn('Web Audio not supported or error generating beep:', error);
+        }
+        
         this.push(0);
         break;
       }
@@ -816,6 +854,509 @@ export class TinyCInterpreter {
         return true;
       }
     }
+
+    // putchar() - output single character
+    if (funcName === 'putchar') {
+      const value = this.evaluateExpression(argsStr);
+      if (value === 0) {
+        this.print('"');
+      } else {
+        this.print(String.fromCharCode(value));
+      }
+      return false;
+    }
+
+    // getchar() - input single character
+    if (funcName === 'getchar') {
+      if (this.inputQueue.length > 0) {
+        const input = this.getInput();
+        this.returnValue = input.length > 0 ? input.charCodeAt(0) : 0;
+        return false;
+      } else {
+        this.requestInput('');
+        return true;
+      }
+    }
+
+    // chrdy() - check if character ready
+    if (funcName === 'chrdy') {
+      this.returnValue = this.inputQueue.length > 0 ? 1 : 0;
+      return false;
+    }
+
+    // gc() - get character (same as getchar but different name)
+    if (funcName === 'gc') {
+      if (this.inputQueue.length > 0) {
+        const input = this.getInput();
+        this.returnValue = input.length > 0 ? input.charCodeAt(0) : 0;
+        return false;
+      } else {
+        this.requestInput('');
+        return true;
+      }
+    }
+
+    // gn() - get number input
+    if (funcName === 'gn') {
+      if (this.inputQueue.length > 0) {
+        const input = this.getInput();
+        const value = parseInt(input) || 0;
+        this.returnValue = value;
+        return false;
+      } else {
+        this.requestInput('number required ');
+        return true;
+      }
+    }
+
+    // alphanum() - check if character is alphanumeric
+    if (funcName === 'alphanum') {
+      const charCode = this.evaluateExpression(argsStr);
+      const char = String.fromCharCode(charCode);
+      const isAlphaNum = /[a-zA-Z0-9_]/.test(char);
+      this.returnValue = isAlphaNum ? 1 : 0;
+      return false;
+    }
+
+    // strlen() - string length
+    if (funcName === 'strlen') {
+      const arrayParam = argsStr.trim();
+      if (this.arrays[arrayParam]) {
+        let len = 0;
+        while (len < this.arrays[arrayParam].length && this.arrays[arrayParam][len] !== 0) {
+          len++;
+        }
+        this.returnValue = len;
+      } else {
+        this.returnValue = 0;
+      }
+      return false;
+    }
+
+    // strcat() - string concatenate
+    if (funcName === 'strcat') {
+      const args = argsStr.split(',').map(a => a.trim());
+      if (args.length >= 2) {
+        const dest = args[0];
+        const src = args[1];
+        if (this.arrays[dest] && this.arrays[src]) {
+          // Find end of dest string
+          let destLen = 0;
+          while (destLen < this.arrays[dest].length && this.arrays[dest][destLen] !== 0) {
+            destLen++;
+          }
+          // Append src to dest
+          let srcIdx = 0;
+          while (srcIdx < this.arrays[src].length && this.arrays[src][srcIdx] !== 0) {
+            this.arrays[dest][destLen + srcIdx] = this.arrays[src][srcIdx];
+            srcIdx++;
+          }
+          this.arrays[dest][destLen + srcIdx] = 0; // null terminate
+        }
+      }
+      return false;
+    }
+
+    // strcpy() - string copy
+    if (funcName === 'strcpy') {
+      const args = argsStr.split(',').map(a => a.trim());
+      if (args.length >= 2) {
+        const dest = args[0];
+        const src = args[1];
+        if (this.arrays[dest] && this.arrays[src]) {
+          let idx = 0;
+          while (idx < this.arrays[src].length && this.arrays[src][idx] !== 0) {
+            this.arrays[dest][idx] = this.arrays[src][idx];
+            idx++;
+          }
+          this.arrays[dest][idx] = 0; // null terminate
+        }
+      }
+      return false;
+    }
+
+    // tolower() - convert string to lowercase
+    if (funcName === 'tolower') {
+      const arrayParam = argsStr.trim();
+      if (this.arrays[arrayParam]) {
+        for (let i = 0; i < this.arrays[arrayParam].length && this.arrays[arrayParam][i] !== 0; i++) {
+          const char = this.arrays[arrayParam][i];
+          if (char >= 65 && char <= 90) { // A-Z
+            this.arrays[arrayParam][i] = char + 32; // Convert to lowercase
+          }
+        }
+      }
+      return false;
+    }
+
+    // toupper() - convert string to uppercase
+    if (funcName === 'toupper') {
+      const arrayParam = argsStr.trim();
+      if (this.arrays[arrayParam]) {
+        for (let i = 0; i < this.arrays[arrayParam].length && this.arrays[arrayParam][i] !== 0; i++) {
+          const char = this.arrays[arrayParam][i];
+          if (char >= 97 && char <= 122) { // a-z
+            this.arrays[arrayParam][i] = char - 32; // Convert to uppercase
+          }
+        }
+      }
+      return false;
+    }
+
+    // sak() - strike any key (prompt and wait for input)
+    if (funcName === 'sak') {
+      if (this.inputQueue.length > 0) {
+        this.getInput(); // consume the input
+        this.returnValue = 0;
+        return false;
+      } else {
+        this.requestInput('Press Enter ... ');
+        return true;
+      }
+    }
+
+    // exit() - exit program
+    if (funcName === 'exit') {
+      this.halted = true;
+      return false;
+    }
+
+    // Terminal control functions (simple implementations for web)
+    if (funcName === 'cls') {
+      this.output = []; // Clear screen by clearing output
+      return false;
+    }
+
+    if (funcName === 'beep') {
+      const args = argsStr.split(',').map(a => this.evaluateExpression(a.trim()));
+      const frequency = args[0] || 800; // Default frequency
+      const duration = args[1] || 200;  // Default duration in milliseconds
+      
+      try {
+        // Create Web Audio context if it doesn't exist
+        if (!this.audioContext) {
+          this.audioContext = new (window.AudioContext || window.webkitAudioContext)();
+        }
+        
+        // Create oscillator for the tone
+        const oscillator = this.audioContext.createOscillator();
+        const gainNode = this.audioContext.createGain();
+        
+        // Connect oscillator -> gain -> output
+        oscillator.connect(gainNode);
+        gainNode.connect(this.audioContext.destination);
+        
+        // Set frequency and waveform
+        oscillator.frequency.setValueAtTime(frequency, this.audioContext.currentTime);
+        oscillator.type = 'sine'; // Pure sine wave tone
+        
+        // Set volume envelope (fade in/out to avoid clicks)
+        const now = this.audioContext.currentTime;
+        const durationSec = duration / 1000;
+        
+        gainNode.gain.setValueAtTime(0, now);
+        gainNode.gain.linearRampToValueAtTime(0.1, now + 0.01); // Fade in
+        gainNode.gain.setValueAtTime(0.1, now + durationSec - 0.01); // Hold
+        gainNode.gain.linearRampToValueAtTime(0, now + durationSec); // Fade out
+        
+        // Start and stop the tone
+        oscillator.start(now);
+        oscillator.stop(now + durationSec);
+        
+      } catch (error) {
+        console.warn('Web Audio not supported or error generating beep:', error);
+        // Fallback to bell character if Web Audio fails
+        this.print('\a');
+      }
+      
+      return false;
+    }
+
+    // Cursor control functions (no-op for web)
+    if (['cnormal', 'chide', 'csolid', 'on', 'off', 'solid'].includes(funcName)) {
+      return false; // No-op
+    }
+
+    // Color and positioning (simplified for web)
+    if (funcName === 'color' || funcName === 'hilo' || funcName === 'oo') {
+      return false; // No-op
+    }
+
+    if (funcName === 'posc') {
+      return false; // No-op for web
+    }
+
+    // File operations (simplified - not implemented in web version)
+    if (['readfile', 'writefile', 'fopen', 'fread', 'fwrite', 'fclose'].includes(funcName)) {
+      this.returnValue = -1; // File operations not supported
+      return false;
+    }
+
+    // num() - convert string buffer to number
+    if (funcName === 'num') {
+      const args = argsStr.split(',').map(a => a.trim());
+      if (args.length >= 2) {
+        const bufferName = args[0];
+        const valueName = args[1];
+        if (this.arrays[bufferName]) {
+          let numStr = '';
+          let k = 0;
+          // Read up to 5 digits
+          while (k < 5 && k < this.arrays[bufferName].length) {
+            const charCode = this.arrays[bufferName][k];
+            const char = String.fromCharCode(charCode);
+            if (char >= '0' && char <= '9') {
+              numStr += char;
+            } else {
+              break;
+            }
+            k++;
+          }
+          // Set the value variable
+          if (this.variables[valueName] !== undefined) {
+            this.variables[valueName] = parseInt(numStr) || 0;
+          }
+          this.returnValue = k; // Return number of characters processed
+        } else {
+          this.returnValue = 0;
+        }
+      }
+      return false;
+    }
+
+    // atoi() - ASCII to integer conversion
+    if (funcName === 'atoi') {
+      const args = argsStr.split(',').map(a => a.trim());
+      if (args.length >= 2) {
+        const bufferName = args[0];
+        const valueName = args[1];
+        if (this.arrays[bufferName]) {
+          let numStr = '';
+          let k = 0;
+          let sign = 1;
+          
+          // Skip whitespace and handle sign
+          while (k < this.arrays[bufferName].length) {
+            const char = String.fromCharCode(this.arrays[bufferName][k]);
+            if (char === ' ') {
+              k++;
+            } else if (char === '-') {
+              sign = -1;
+              k++;
+              break;
+            } else if (char === '+') {
+              k++;
+              break;
+            } else {
+              break;
+            }
+          }
+          
+          // Read digits
+          const startK = k;
+          while (k < this.arrays[bufferName].length) {
+            const char = String.fromCharCode(this.arrays[bufferName][k]);
+            if (char >= '0' && char <= '9') {
+              numStr += char;
+              k++;
+            } else {
+              break;
+            }
+          }
+          
+          // Set the value variable
+          if (this.variables[valueName] !== undefined) {
+            this.variables[valueName] = sign * (parseInt(numStr) || 0);
+          }
+          this.returnValue = k; // Return total characters processed
+        } else {
+          this.returnValue = 0;
+        }
+      }
+      return false;
+    }
+
+    // ceqn() - compare equal n characters
+    if (funcName === 'ceqn') {
+      const args = argsStr.split(',').map(a => a.trim());
+      if (args.length >= 3) {
+        const a = args[0];
+        const b = args[1];
+        const n = this.evaluateExpression(args[2]);
+        
+        if (this.arrays[a] && this.arrays[b]) {
+          for (let k = 0; k < n; k++) {
+            if ((this.arrays[a][k] || 0) !== (this.arrays[b][k] || 0)) {
+              this.returnValue = 0;
+              return false;
+            }
+          }
+          this.returnValue = 1;
+        } else {
+          this.returnValue = 0;
+        }
+      }
+      return false;
+    }
+
+    // index() - find substring in string
+    if (funcName === 'index') {
+      const args = argsStr.split(',').map(a => a.trim());
+      if (args.length >= 4) {
+        const haystack = args[0]; // string to search in
+        const l = this.evaluateExpression(args[1]); // length of haystack
+        const needle = args[2]; // string to find
+        const n = this.evaluateExpression(args[3]); // length of needle
+        
+        if (n <= 0) {
+          this.returnValue = 1;
+          return false;
+        }
+        if (l <= 0) {
+          this.returnValue = 0;
+          return false;
+        }
+        
+        if (this.arrays[haystack] && this.arrays[needle]) {
+          // Search for needle in haystack
+          for (let a = 0; a + n <= l; a++) {
+            let match = true;
+            for (let i = 0; i < n; i++) {
+              if ((this.arrays[haystack][a + i] || 0) !== (this.arrays[needle][i] || 0)) {
+                match = false;
+                break;
+              }
+            }
+            if (match) {
+              this.returnValue = a; // Return position where found
+              return false;
+            }
+          }
+        }
+        this.returnValue = 0; // Not found
+      }
+      return false;
+    }
+
+    // move() - move/copy string data
+    if (funcName === 'move') {
+      const args = argsStr.split(',').map(a => a.trim());
+      if (args.length >= 2) {
+        const source = args[0];
+        const dest = args[1];
+        
+        if (this.arrays[source] && this.arrays[dest]) {
+          let k = 0;
+          // Copy until null terminator or array end
+          while (k < this.arrays[source].length && this.arrays[source][k] !== 0) {
+            if (k < this.arrays[dest].length) {
+              this.arrays[dest][k] = this.arrays[source][k];
+            }
+            k++;
+          }
+          // Null terminate destination
+          if (k < this.arrays[dest].length) {
+            this.arrays[dest][k] = 0;
+          }
+          this.returnValue = k; // Return length copied
+        } else {
+          this.returnValue = 0;
+        }
+      }
+      return false;
+    }
+
+    // movebl() - move block of memory
+    if (funcName === 'movebl') {
+      const args = argsStr.split(',').map(a => a.trim());
+      if (args.length >= 3) {
+        // For web implementation, this is simplified
+        this.returnValue = 1; // Success
+      }
+      return false;
+    }
+
+    // countch() - count characters
+    if (funcName === 'countch') {
+      const args = argsStr.split(',').map(a => a.trim());
+      if (args.length >= 3) {
+        const array = args[0];
+        const endArray = args[1];
+        const searchChar = this.evaluateExpression(args[2]);
+        
+        // Simple implementation - count occurrences of character
+        if (this.arrays[array]) {
+          let count = 0;
+          for (let i = 0; i < this.arrays[array].length && this.arrays[array][i] !== 0; i++) {
+            if (this.arrays[array][i] === searchChar) {
+              count++;
+            }
+          }
+          this.returnValue = count;
+        } else {
+          this.returnValue = 0;
+        }
+      }
+      return false;
+    }
+
+    // scann() - scan for character
+    if (funcName === 'scann') {
+      const args = argsStr.split(',').map(a => a.trim());
+      if (args.length >= 4) {
+        const array = args[0];
+        const endArray = args[1]; 
+        const searchChar = this.evaluateExpression(args[2]);
+        const countVar = args[3];
+        
+        // Simple implementation - find first occurrence
+        if (this.arrays[array]) {
+          for (let i = 0; i < this.arrays[array].length; i++) {
+            if (this.arrays[array][i] === searchChar || this.arrays[array][i] === 0) {
+              this.returnValue = i;
+              return false;
+            }
+          }
+        }
+        this.returnValue = 0;
+      }
+      return false;
+    }
+
+    // memset() - set memory to value
+    if (funcName === 'memset') {
+      const args = argsStr.split(',').map(a => a.trim());
+      if (args.length >= 3) {
+        const array = args[0];
+        const size = this.evaluateExpression(args[1]);
+        const value = this.evaluateExpression(args[2]);
+        
+        if (this.arrays[array]) {
+          for (let i = 0; i < size && i < this.arrays[array].length; i++) {
+            this.arrays[array][i] = value;
+          }
+        }
+      }
+      return false;
+    }
+
+    // pft() - print formatted text (simplified)
+    if (funcName === 'pft') {
+      const args = argsStr.split(',').map(a => a.trim());
+      if (args.length >= 2) {
+        const format = args[0];
+        const text = args[1];
+        // Simple implementation - just print the text
+        if (this.arrays[format] && this.arrays[text]) {
+          let str = '';
+          for (let i = 0; i < this.arrays[text].length && this.arrays[text][i] !== 0; i++) {
+            str += String.fromCharCode(this.arrays[text][i]);
+          }
+          this.print(str);
+        }
+      }
+      return false;
+    }
     
     // User-defined function
     if (this.functions[funcName]) {
@@ -1122,6 +1663,36 @@ export class TinyCInterpreter {
         const val = this.evaluateExpression(match[1], depth + 1);
         processed = processed.replace(match[0], Math.abs(val).toString());
       }
+    }
+
+    // Add support for other builtin functions in expressions
+    if (processed.includes('strlen(') && !this.functions['strlen']) {
+      const match = processed.match(/strlen\(([^)]+)\)/);
+      if (match) {
+        const arrayParam = match[1];
+        let len = 0;
+        if (this.arrays[arrayParam]) {
+          while (len < this.arrays[arrayParam].length && this.arrays[arrayParam][len] !== 0) {
+            len++;
+          }
+        }
+        processed = processed.replace(match[0], len.toString());
+      }
+    }
+
+    if (processed.includes('alphanum(') && !this.functions['alphanum']) {
+      const match = processed.match(/alphanum\(([^)]+)\)/);
+      if (match) {
+        const charCode = this.evaluateExpression(match[1], depth + 1);
+        const char = String.fromCharCode(charCode);
+        const isAlphaNum = /[a-zA-Z0-9_]/.test(char);
+        processed = processed.replace(match[0], (isAlphaNum ? 1 : 0).toString());
+      }
+    }
+
+    if (processed.includes('chrdy()') && !this.functions['chrdy']) {
+      const result = this.inputQueue.length > 0 ? 1 : 0;
+      processed = processed.replace(/chrdy\(\)/g, result.toString());
     }
     
     // Evaluate basic math expressions

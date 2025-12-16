@@ -173,14 +173,14 @@ function App() {
               
               <section>
                 <h3>Variables</h3>
-                <p>Variables are declared implicitly by assignment. All variables are integers.</p>
-                <pre>x = 10{'\n'}y = x + 5{'\n'}result = x * y</pre>
+                <p>Variables must be declared before use. Tiny-C supports integers and character arrays.</p>
+                <pre>int x, y, result{'\n'}char name(20), buffer(50){'\n'}{'\n'}x = 10{'\n'}y = x + 5{'\n'}result = x * y</pre>
               </section>
               
               <section>
                 <h3>Arrays</h3>
-                <p>Declare arrays with size in parentheses:</p>
-                <pre>int arr(10)     /* Declare array of 10 elements */{'\n'}arr(0) = 5      /* Set first element */{'\n'}x = arr(0)      /* Read first element */</pre>
+                <p>Declare arrays with size in parentheses. Use parentheses for array access:</p>
+                <pre>int numbers(10){'\n'}char message(50){'\n'}{'\n'}numbers(0) = 42    /* Set first element */{'\n'}x = numbers(0)     /* Read first element */{'\n'}{'\n'}strcpy(message, "Hello"){'\n'}pl message</pre>
               </section>
               
               <section>
@@ -197,12 +197,15 @@ function App() {
               
               <section>
                 <h3>Functions</h3>
-                <p>Define functions with parameter lists:</p>
-                <pre>add(a, b) [{'\n'}  result = a + b{'\n'}  return result{'\n'}]{'\n'}{'\n'}x = add(5, 3)  /* Call function */</pre>
+                <p>Define functions with square brackets and optional parameters:</p>
+                <pre>/* Simple function */{'\n'}hello[{'\n'}  pl "Hello, World!"{'\n'}]{'\n'}{'\n'}/* Function with parameters */{'\n'}add int a, b[{'\n'}  return a + b{'\n'}]{'\n'}{'\n'}/* Function calls */{'\n'}hello(){'\n'}result = add(5, 3)</pre>
               </section>
               
               <section>
                 <h3>Built-in Functions</h3>
+                <p>Tiny-C includes a comprehensive standard library with 48+ built-in functions:</p>
+                
+                <h4>Input/Output Functions</h4>
                 <table className="docs-table">
                   <thead>
                     <tr>
@@ -224,28 +227,152 @@ function App() {
                     </tr>
                     <tr>
                       <td><code>pn expr</code></td>
-                      <td>Print number</td>
+                      <td>Print number with space</td>
                       <td><code>pn x</code></td>
                     </tr>
                     <tr>
-                      <td><code>pr "text"</code></td>
-                      <td>Print raw (no formatting)</td>
-                      <td><code>pr "Title"</code></td>
+                      <td><code>putchar(c)</code></td>
+                      <td>Output single character</td>
+                      <td><code>putchar(65)</code></td>
                     </tr>
                     <tr>
-                      <td><code>getnum("prompt")</code></td>
-                      <td>Get number input from user</td>
-                      <td><code>age = getnum("Age:")</code></td>
+                      <td><code>getchar()</code></td>
+                      <td>Input single character</td>
+                      <td><code>c = getchar()</code></td>
                     </tr>
+                    <tr>
+                      <td><code>gs(buffer)</code></td>
+                      <td>Get string input</td>
+                      <td><code>gs(name)</code></td>
+                    </tr>
+                    <tr>
+                      <td><code>gn()</code></td>
+                      <td>Get number input</td>
+                      <td><code>age = gn()</code></td>
+                    </tr>
+                    <tr>
+                      <td><code>chrdy()</code></td>
+                      <td>Check if input ready</td>
+                      <td><code>if(chrdy()) ...</code></td>
+                    </tr>
+                  </tbody>
+                </table>
+                
+                <h4>String Functions</h4>
+                <table className="docs-table">
+                  <thead>
+                    <tr>
+                      <th>Function</th>
+                      <th>Description</th>
+                      <th>Example</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <tr>
+                      <td><code>strlen(str)</code></td>
+                      <td>Get string length</td>
+                      <td><code>len = strlen(name)</code></td>
+                    </tr>
+                    <tr>
+                      <td><code>strcpy(dest, src)</code></td>
+                      <td>Copy string</td>
+                      <td><code>strcpy(copy, original)</code></td>
+                    </tr>
+                    <tr>
+                      <td><code>strcat(dest, src)</code></td>
+                      <td>Concatenate strings</td>
+                      <td><code>strcat(greeting, name)</code></td>
+                    </tr>
+                    <tr>
+                      <td><code>tolower(str)</code></td>
+                      <td>Convert to lowercase</td>
+                      <td><code>tolower(text)</code></td>
+                    </tr>
+                    <tr>
+                      <td><code>toupper(str)</code></td>
+                      <td>Convert to uppercase</td>
+                      <td><code>toupper(text)</code></td>
+                    </tr>
+                    <tr>
+                      <td><code>alphanum(c)</code></td>
+                      <td>Check if alphanumeric</td>
+                      <td><code>if(alphanum(ch)) ...</code></td>
+                    </tr>
+                  </tbody>
+                </table>
+                
+                <h4>Parsing & Search Functions</h4>
+                <table className="docs-table">
+                  <thead>
+                    <tr>
+                      <th>Function</th>
+                      <th>Description</th>
+                      <th>Example</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <tr>
+                      <td><code>num(buf, val)</code></td>
+                      <td>Parse digits to number</td>
+                      <td><code>num(input, result)</code></td>
+                    </tr>
+                    <tr>
+                      <td><code>atoi(buf, val)</code></td>
+                      <td>ASCII to integer</td>
+                      <td><code>atoi(text, number)</code></td>
+                    </tr>
+                    <tr>
+                      <td><code>index(str, len, find, n)</code></td>
+                      <td>Find substring position</td>
+                      <td><code>pos = index(text, 20, "hello", 5)</code></td>
+                    </tr>
+                    <tr>
+                      <td><code>ceqn(s1, s2, n)</code></td>
+                      <td>Compare n characters</td>
+                      <td><code>if(ceqn(a, b, 3)) ...</code></td>
+                    </tr>
+                  </tbody>
+                </table>
+                
+                <h4>System Functions</h4>
+                <table className="docs-table">
+                  <thead>
+                    <tr>
+                      <th>Function</th>
+                      <th>Description</th>
+                      <th>Example</th>
+                    </tr>
+                  </thead>
+                  <tbody>
                     <tr>
                       <td><code>random(max)</code></td>
                       <td>Random number 1 to max</td>
                       <td><code>x = random(100)</code></td>
                     </tr>
                     <tr>
-                      <td><code>abs(x)</code></td>
-                      <td>Absolute value</td>
-                      <td><code>y = abs(-5)</code></td>
+                      <td><code>version()</code></td>
+                      <td>Get interpreter version</td>
+                      <td><code>v = version()</code></td>
+                    </tr>
+                    <tr>
+                      <td><code>cls()</code></td>
+                      <td>Clear screen</td>
+                      <td><code>cls()</code></td>
+                    </tr>
+                    <tr>
+                      <td><code>beep(freq, dur)</code></td>
+                      <td>Generate tone (frequency Hz, duration ms)</td>
+                      <td><code>beep(800, 500)</code></td>
+                    </tr>
+                    <tr>
+                      <td><code>sak()</code></td>
+                      <td>"Strike any key" prompt</td>
+                      <td><code>sak()</code></td>
+                    </tr>
+                    <tr>
+                      <td><code>exit()</code></td>
+                      <td>Exit program</td>
+                      <td><code>exit()</code></td>
                     </tr>
                   </tbody>
                 </table>
