@@ -13,17 +13,32 @@ function App() {
   const [isRunning, setIsRunning] = useState(false);
   const [error, setError] = useState('');
   const [showDocs, setShowDocs] = useState(false);
+  const [showSpinner, setShowSpinner] = useState(false);
   const [interpreter] = useState(() => new TinyCInterpreter());
   const inputRef = useRef(null);
+  const spinnerTimer = useRef(null);
 
   const handleRun = () => {
     try {
       setIsRunning(true);
       setOutput('');
       setError('');
+      setShowSpinner(false);
+      
+      // Start spinner timer for long-running operations
+      spinnerTimer.current = setTimeout(() => {
+        setShowSpinner(true);
+      }, 10);
       
       const result = interpreter.execute(code);
       setOutput(result);
+      
+      // Clear spinner timer
+      if (spinnerTimer.current) {
+        clearTimeout(spinnerTimer.current);
+        spinnerTimer.current = null;
+      }
+      setShowSpinner(false);
       
       if (interpreter.isWaitingForInput()) {
         setTimeout(() => inputRef.current?.focus(), 100);
@@ -31,6 +46,12 @@ function App() {
         setIsRunning(false);
       }
     } catch (error) {
+      // Clear spinner on error
+      if (spinnerTimer.current) {
+        clearTimeout(spinnerTimer.current);
+        spinnerTimer.current = null;
+      }
+      setShowSpinner(false);
       setError(`Runtime error: ${error.message}\nStack: ${error.stack}`);
       setIsRunning(false);
     }
@@ -49,9 +70,21 @@ function App() {
       // Clear input field
       setInput('');
       
+      // Start spinner timer for continued execution
+      spinnerTimer.current = setTimeout(() => {
+        setShowSpinner(true);
+      }, 10);
+      
       // Continue execution
       const result = interpreter.continueExecution();
       setOutput(result);
+      
+      // Clear spinner timer
+      if (spinnerTimer.current) {
+        clearTimeout(spinnerTimer.current);
+        spinnerTimer.current = null;
+      }
+      setShowSpinner(false);
       
       // Check if still waiting for more input
       if (!interpreter.isWaitingForInput()) {
@@ -60,6 +93,12 @@ function App() {
         setTimeout(() => inputRef.current?.focus(), 100);
       }
     } catch (error) {
+      // Clear spinner on error
+      if (spinnerTimer.current) {
+        clearTimeout(spinnerTimer.current);
+        spinnerTimer.current = null;
+      }
+      setShowSpinner(false);
       setError(`Runtime error: ${error.message}\nStack: ${error.stack}`);
       setIsRunning(false);
     }
@@ -124,6 +163,12 @@ function App() {
         <button className="btn btn-primary" onClick={handleRun}>
           Run
         </button>
+        {showSpinner && (
+          <div className="spinner-container">
+            <div className="spinner"></div>
+            <span className="spinner-text">Running...</span>
+          </div>
+        )}
         <button className="btn btn-secondary" onClick={handleClear}>
           Clear
         </button>
