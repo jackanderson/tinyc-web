@@ -1,170 +1,89 @@
-/* Code Editor Container */
-.code-editor-container {
+/* Code Editor Wrapper */
+.code-editor-wrapper {
   width: 100%;
   height: 100%;
-  background: #0d1117;
   border-radius: 6px;
   border: 1px solid #30363d;
-  display: flex;
   overflow: hidden;
   font-family: 'JetBrains Mono', 'Fira Code', 'SF Mono', Monaco, 'Cascadia Code', 'Roboto Mono', Consolas, 'Courier New', monospace;
-  font-size: 13px;
-  line-height: 1.5;
 }
 
-.code-editor-container.disabled {
+.code-editor-wrapper.disabled {
   opacity: 0.6;
-  cursor: not-allowed;
-}
-
-/* Line Numbers */
-.line-numbers {
-  background: #161b22;
-  color: #7d8590;
-  padding: 16px 8px 16px 16px;
-  border-right: 1px solid #21262d;
-  user-select: none;
-  min-width: 40px;
-  text-align: right;
-  overflow-y: hidden;
-  overflow-x: hidden;
-  flex-shrink: 0;
-}
-
-.line-number {
-  height: 19.5px; /* Match line-height * font-size */
-  display: flex;
-  align-items: center;
-  justify-content: flex-end;
-}
-
-/* Editor Wrapper */
-.editor-wrapper {
-  flex: 1;
-  position: relative;
-  overflow: hidden;
-}
-
-/* Syntax Highlighting Layer */
-.syntax-highlight {
-  position: absolute;
-  top: 0;
-  left: 0;
-  width: 100%;
-  height: 100%;
-  padding: 16px;
-  color: #f0f6fc;
-  white-space: pre-wrap;
-  word-wrap: break-word;
-  overflow: auto;
-  z-index: 1;
   pointer-events: none;
-  tab-size: 4;
-  font-family: inherit;
-  font-size: inherit;
-  line-height: inherit;
 }
 
-/* Code Textarea */
-.code-textarea {
-  position: absolute;
-  top: 0;
-  left: 0;
-  width: 100%;
-  height: 100%;
-  padding: 16px;
-  background: transparent;
-  color: transparent;
-  caret-color: #f0f6fc;
-  border: none;
-  outline: none;
-  resize: none;
-  font-family: inherit;
-  font-size: inherit;
-  line-height: inherit;
-  white-space: pre-wrap;
-  word-wrap: break-word;
-  overflow: auto;
-  z-index: 2;
-  tab-size: 4;
+/* Ace Editor Overrides */
+.code-editor-wrapper .ace_editor {
+  font-family: 'JetBrains Mono', 'Fira Code', 'SF Mono', Monaco, 'Cascadia Code', 'Roboto Mono', Consolas, 'Courier New', monospace !important;
 }
 
-.code-textarea::placeholder {
-  color: #7d8590;
+.code-editor-wrapper .ace_gutter {
+  background: #0a0e14 !important;
+  border-right: 1px solid #1a2332 !important;
+  color: #4a6b8a !important;
 }
 
-.code-textarea::selection {
-  background: #264f78;
+.code-editor-wrapper .ace_gutter-active-line {
+  background: #1a2332 !important;
 }
 
-.code-textarea:disabled {
-  cursor: not-allowed;
+.code-editor-wrapper .ace_content {
+  background: #0d1117 !important;
 }
 
-/* Syntax Highlighting Colors - Softer Cool Palette */
-.syntax-highlight .token-keyword {
-  color: #7dd3fc !important; /* Soft sky blue for keywords */
-  font-weight: 500;
+.code-editor-wrapper .ace_cursor {
+  color: #6fb3d2 !important;
 }
 
-.syntax-highlight .token-string {
-  color: #86efac !important; /* Soft mint green for strings */
+.code-editor-wrapper .ace_selection {
+  background: #1e3a5f !important;
 }
 
-.syntax-highlight .token-comment {
-  color: #94a3b8 !important; /* Soft slate gray for comments */
-  font-style: italic;
+.ace-coolcolors .ace_active-line {
+  background: #151b24 !important;
 }
 
-.syntax-highlight .token-number {
-  color: #c084fc !important; /* Soft purple for numbers */
+.code-editor-wrapper .ace_line {
+  background: transparent !important;
 }
 
-.syntax-highlight .token-operator {
-  color: #67e8f9 !important; /* Soft cyan for operators */
+.code-editor-wrapper .ace_placeholder {
+  color: #5a7a9a !important;
+  font-style: italic !important;
 }
 
-.syntax-highlight .token-identifier {
-  color: #e2e8f0 !important; /* Soft white for identifiers */
-}
-
-.syntax-highlight .token-whitespace {
-  color: transparent !important;
-}
-
-.syntax-highlight .token-other {
-  color: #e2e8f0 !important; /* Soft white for other tokens */
-}
-
-/* Scrollbars */
-.syntax-highlight::-webkit-scrollbar,
-.code-textarea::-webkit-scrollbar {
+/* Custom scrollbar for ace editor */
+.code-editor-wrapper .ace_scrollbar-v::-webkit-scrollbar {
   width: 8px;
-  height: 8px;
 }
 
-.syntax-highlight::-webkit-scrollbar-track,
-.code-textarea::-webkit-scrollbar-track {
+.code-editor-wrapper .ace_scrollbar-v::-webkit-scrollbar-track {
   background: #0d1117;
 }
 
-.syntax-highlight::-webkit-scrollbar-thumb,
-.code-textarea::-webkit-scrollbar-thumb {
+.code-editor-wrapper .ace_scrollbar-v::-webkit-scrollbar-thumb {
   background: #21262d;
   border-radius: 4px;
 }
 
-.syntax-highlight::-webkit-scrollbar-thumb:hover,
-.code-textarea::-webkit-scrollbar-thumb:hover {
+.code-editor-wrapper .ace_scrollbar-v::-webkit-scrollbar-thumb:hover {
   background: #30363d;
 }
 
-/* Hide scrollbars on syntax highlight layer to avoid double scrollbars */
-.syntax-highlight::-webkit-scrollbar {
-  display: none;
+.code-editor-wrapper .ace_scrollbar-h::-webkit-scrollbar {
+  height: 8px;
 }
 
-.syntax-highlight {
-  scrollbar-width: none; /* Firefox */
-  -ms-overflow-style: none; /* IE and Edge */
+.code-editor-wrapper .ace_scrollbar-h::-webkit-scrollbar-track {
+  background: #0d1117;
+}
+
+.code-editor-wrapper .ace_scrollbar-h::-webkit-scrollbar-thumb {
+  background: #21262d;
+  border-radius: 4px;
+}
+
+.code-editor-wrapper .ace_scrollbar-h::-webkit-scrollbar-thumb:hover {
+  background: #30363d;
 }

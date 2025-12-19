@@ -283,11 +283,21 @@ export class TinyCInterpreter {
     }
   }
   
+  // Strip single-line /* comments from a line
+  stripComment(line) {
+    const commentIndex = line.indexOf('/*');
+    if (commentIndex !== -1) {
+      return line.substring(0, commentIndex);
+    }
+    return line;
+  }
+
   // Execute a tiny-c program
   execute(code) {
     this.reset();
     this.code = code;
-    this.lines = code.split('\n');
+    // Strip comments from each line before splitting
+    this.lines = code.split('\n').map(line => this.stripComment(line));
     this.lineIndex = 0;
     
     try {
@@ -434,6 +444,11 @@ export class TinyCInterpreter {
         
         const trimmed = this.lines[i].trim();
         
+        // Debug Trek main loop detection
+        if (trimmed.includes('while ((e >= 0) * (d >= 0))')) {
+          console.log(`[TREK-MAIN-LOOP] Found main loop at line ${i}: e=${this.variables.e}, d=${this.variables.d}, condition=${(this.variables.e >= 0) * (this.variables.d >= 0)}`);
+        }
+        
         // Skip comments, empty lines
         if (trimmed.startsWith('/*') || trimmed.startsWith('//') || trimmed === '' || trimmed === ']') {
           this.lineIndex++;
@@ -579,8 +594,9 @@ export class TinyCInterpreter {
       return this.executeFor(line);
     }
     
-    // Function call
-    if (line.match(/^(\w+)\s*\(/)) {
+    // Function call - but not assignment (avoid matching "array(index) = value")
+    if (line.match(/^(\w+)\s*\(/) && !line.includes('=')) {
+      console.log(`[FUNC-CALL] Executing function: ${line}`);
       return this.executeFunction(line);
     }
     
@@ -681,6 +697,7 @@ export class TinyCInterpreter {
       const getcmdMatch = expr.match(/^getcmd\("([^"]*)"\)$/);
       if (getcmdMatch) {
         const prompt = getcmdMatch[1];
+        console.log(`[GETCMD] Processing getcmd with prompt: "${prompt}"`);
         if (this.inputQueue.length > 0) {
           const input = this.getInput();
           this.print(input + '\n');
@@ -690,9 +707,16 @@ export class TinyCInterpreter {
           } else {
             this.variables[varName] = value;
           }
-          console.log(`getcmd returned: '${input.charAt(0)}' (${value})`);
+          console.log(`[GETCMD] Returned: '${input.charAt(0)}' (${value}) to variable ${varName}`);
+          
+          // Special debugging for Trek main loop variables after getcmd
+          if (varName === 'cc') {
+            console.log(`[GETCMD-TREK] After setting cc=${value}: e=${this.variables.e}, d=${this.variables.d}, k=${this.variables.k}`);
+          }
+          
           return false;
         } else {
+          console.log(`[GETCMD] Waiting for input with prompt: "${prompt}"`);
           this.requestInput(prompt + ' ');
           return true; // Wait for input
         }
@@ -1382,6 +1406,131 @@ export class TinyCInterpreter {
     
     console.log('[executeUserFunction] Executing', funcName, 'from lineIndex', this.lineIndex, 'loopState:', this.loopState ? 'exists' : 'none');
     
+    // Special debugging for main function
+    if (funcName === 'main') {
+      console.log('[MAIN-FUNC] Variables: e=', this.variables.e, 'd=', this.variables.d, 'cc=', this.variables.cc);
+    }
+    
+    // If we have a saved loop state, we need to resume the loop
+    if (this.loopState) {
+      console.log('[executeUserFunction] Resuming loop:', this.loopState.type, 'at lineIndex', this.lineIndex);
+      if (this.loopState.type === 'while') {
+        // Resume the while loop directly
+        const savedState = this.loopState;
+        this.loopState = null; // Clear it before calling to avoid infinite recursion
+        
+        const savedInLoop = this.inLoop;
+        this.inLoop = true;
+        
+        let iterations = savedState.iterations;
+        const condition = savedState.condition;
+        const loopStart = savedState.loopStart;
+        const loopEnd = savedState.loopEnd;
+        
+        // Continue executing from current lineIndex (where we waited) until end of iteration
+        while (this.lineIndex <= loopEnd) {
+          const lineText = this.lines[this.lineIndex];
+          this.lineIndex++;
+          
+          const trimmed = lineText.trim();
+          if (trimmed === '' || trimmed.startsWith('/*') || trimmed === '[' || trimmed === ']') continue;
+          
+          const shouldWait = this.executeLine(trimmed);
+          
+          if (shouldWait) {
+            // Still waiting - save state again
+            this.loopState = {
+              type: 'while',
+              condition: condition,
+              loopStart: loopStart,
+              loopEnd: loopEnd,
+              iterations: iterations,
+              savedInLoop: savedState.savedInLoop
+            };
+            this.inLoop = savedState.savedInLoop;
+            return true;
+          }
+          if (this.shouldReturn) {
+            this.lineIndex = loopEnd;
+            this.inLoop = savedState.savedInLoop;
+            return false;
+          }
+          if (this.shouldBreak) break;
+          if (this.shouldContinue) break;
+        }
+        
+        if (this.shouldBreak) {
+          this.lineIndex = loopEnd;
+          this.shouldBreak = false;
+          this.inLoop = savedState.savedInLoop;
+          return false;
+        }
+        
+        // Completed one iteration after resuming - check condition and continue loop
+        console.log('While iteration', iterations, 'completed after resume');
+        let conditionResult = this.evaluateCondition(condition);
+        
+        // Continue the while loop
+        while (conditionResult) {
+          iterations++;
+          console.log('While iteration', iterations, 'condition:', condition, '=', conditionResult);
+          if (iterations > 100000) {
+            console.error('While loop exceeded 100000 iterations - breaking');
+            this.println('ERROR: Infinite loop detected - breaking');
+            break;
+          }
+          
+          this.shouldBreak = false;
+          this.shouldContinue = false;
+          
+          // Execute loop body
+          this.lineIndex = loopStart;
+          while (this.lineIndex <= loopEnd) {
+            const lineText = this.lines[this.lineIndex];
+            this.lineIndex++;
+            
+            const trimmed = lineText.trim();
+            if (trimmed === '' || trimmed.startsWith('/*') || trimmed === '[' || trimmed === ']') continue;
+            
+            const shouldWait = this.executeLine(trimmed);
+            
+            if (shouldWait) {
+              // Save loop state for resumption
+              this.loopState = {
+                type: 'while',
+                condition: condition,
+                loopStart: loopStart,
+                loopEnd: loopEnd,
+                iterations: iterations,
+                savedInLoop: savedState.savedInLoop
+              };
+              this.inLoop = savedState.savedInLoop;
+              return true;
+            }
+            if (this.shouldReturn) {
+              this.lineIndex = loopEnd;
+              this.inLoop = savedState.savedInLoop;
+              return false;
+            }
+            if (this.shouldBreak) break;
+            if (this.shouldContinue) break;
+          }
+          
+          if (this.shouldBreak) break;
+          
+          // Re-evaluate condition for next iteration
+          conditionResult = this.evaluateCondition(condition);
+        }
+        
+        console.log('While loop ended after', iterations, 'iterations');
+        this.lineIndex = loopEnd;
+        this.shouldBreak = false;
+        this.inLoop = savedState.savedInLoop;
+        return false;
+      }
+      // For other loop types, add handling here if needed
+    }
+    
     // If we're not already in this function, set it up
     if (this.currentFunction !== funcName) {
       // Save current execution context if we're in a function
@@ -1473,10 +1622,12 @@ export class TinyCInterpreter {
       this.currentFunction = prevContext.functionName;
       this.lineIndex = prevContext.lineIndex;
       this.inFunction = true;
+      console.log(`[executeUserFunction] Restored context: ${prevContext.functionName} at line ${prevContext.lineIndex}`);
       // DO NOT increment lineIndex here - the caller's loop will handle it
     } else {
       this.currentFunction = null;
       this.inFunction = false;
+      console.log(`[executeUserFunction] Function ${funcName} completed, no previous context`);
     }
     this.shouldReturn = false;
     return false;
@@ -1616,6 +1767,11 @@ export class TinyCInterpreter {
       
       // Skip if it's a known non-function pattern or already handled
       if (funcName === 'version' || funcName === 'gn') {
+        continue;
+      }
+      
+      // Skip if it's an array (should have been handled earlier)
+      if (this.arrays[funcName]) {
         continue;
       }
       
@@ -1985,9 +2141,21 @@ export class TinyCInterpreter {
       
       // Continue with the while loop
       let conditionResult = this.evaluateCondition(condition);
+      console.log('[WHILE-LOOP] Starting while loop with condition:', condition, '=', conditionResult);
+      
+      // Special debugging for Trek main loop
+      if (condition.includes('e >= 0') && condition.includes('d >= 0')) {
+        console.log('[TREK-LOOP] Initial: e =', this.variables.e, 'd =', this.variables.d, 'cc =', this.variables.cc);
+      }
+      
       while (conditionResult) {
         iterCount++;
-        console.log('While iteration', iterCount, 'condition:', condition, '=', conditionResult);
+        console.log('[WHILE-LOOP] While iteration', iterCount, 'condition:', condition, '=', conditionResult);
+        
+        // Special debugging for Trek main loop
+        if (condition.includes('e >= 0') && condition.includes('d >= 0')) {
+          console.log('[TREK-LOOP] Iteration', iterCount, ': e =', this.variables.e, 'd =', this.variables.d, 'cc =', this.variables.cc);
+        }
         if (iterCount > 100000) {
           console.error('While loop exceeded 100000 iterations - breaking');
           this.println('ERROR: Infinite loop detected - breaking');
@@ -2035,6 +2203,11 @@ export class TinyCInterpreter {
         
         // Re-evaluate condition for next iteration
         conditionResult = this.evaluateCondition(condition);
+        
+        // Special debugging for Trek main loop
+        if (condition.includes('e >= 0') && condition.includes('d >= 0')) {
+          console.log('[TREK-LOOP] Re-evaluated: e =', this.variables.e, 'd =', this.variables.d, 'condition =', conditionResult);
+        }
       }
       
       console.log('While loop ended after', iterCount, 'iterations');
@@ -2216,13 +2389,13 @@ export class TinyCInterpreter {
   
   // Execute while loop
   executeWhile(line) {
-    const match = line.match(/^while\s*\(([^)]+)\)\s*(\[)?$/);
+    const match = line.match(/^\s*while\s*\(([^)]+)\)\s*(\[)?$/);
     if (!match) return false;
     
-    const condition = match[1];
+    let condition = match[1];
     const hasBracket = match[2] === '[';
-    const loopStart = this.lineIndex;
-    const loopEnd = hasBracket ? this.findClosingBracket(this.lineIndex - 1) : this.lineIndex;
+    let loopStart = this.lineIndex;
+    let loopEnd = hasBracket ? this.findClosingBracket(this.lineIndex - 1) : this.lineIndex;
     
     const savedInLoop = this.inLoop;
     this.inLoop = true;
@@ -2234,13 +2407,13 @@ export class TinyCInterpreter {
       console.log('Resuming while loop from saved state, iteration', this.loopState.iterations, 'lineIndex', this.lineIndex);
       // We're resuming - continue executing from current lineIndex within the loop
       iterations = this.loopState.iterations;
-      const savedLoopStart = this.loopState.loopStart;
-      const savedLoopEnd = this.loopState.loopEnd;
-      const savedCondition = this.loopState.condition;
+      loopStart = this.loopState.loopStart;
+      loopEnd = this.loopState.loopEnd;
+      condition = this.loopState.condition;
       this.loopState = null; // Clear the state since we're handling it now
       
       // Continue executing from current lineIndex (which is where we waited)
-      while (this.lineIndex <= savedLoopEnd) {
+      while (this.lineIndex <= loopEnd) {
         const lineText = this.lines[this.lineIndex];
         this.lineIndex++;
         
@@ -2253,9 +2426,9 @@ export class TinyCInterpreter {
           // Still waiting - save state again
           this.loopState = {
             type: 'while',
-            condition: savedCondition,
-            loopStart: savedLoopStart,
-            loopEnd: savedLoopEnd,
+            condition: condition,
+            loopStart: loopStart,
+            loopEnd: loopEnd,
             iterations: iterations,
             savedInLoop: savedInLoop
           };
@@ -2263,7 +2436,7 @@ export class TinyCInterpreter {
           return true;
         }
         if (this.shouldReturn) {
-          this.lineIndex = savedLoopEnd;
+          this.lineIndex = loopEnd;
           this.inLoop = savedInLoop;
           return false;
         }
@@ -2272,16 +2445,27 @@ export class TinyCInterpreter {
       }
       
       if (this.shouldBreak) {
-        this.lineIndex = savedLoopEnd;
+        this.lineIndex = loopEnd;
         this.shouldBreak = false;
         this.inLoop = savedInLoop;
         return false;
       }
       
-      // Completed one iteration after resuming, now continue with normal while loop
+      // Completed one iteration after resuming - check condition for next iteration
+      console.log('While iteration', iterations, 'completed after resume');
+      conditionResult = this.evaluateCondition(condition);
+      if (!conditionResult) {
+        // Loop condition is false after resume, exit loop
+        this.lineIndex = loopEnd;
+        this.shouldBreak = false;
+        this.inLoop = savedInLoop;
+        return false;
+      }
+      // Condition is still true, start next iteration
       iterations++;
     }
     
+    // Start the while loop (or continue if resuming)
     let conditionResult = this.evaluateCondition(condition);
     while (conditionResult) {
       iterations++;
@@ -2344,7 +2528,8 @@ export class TinyCInterpreter {
   
   // Execute do-while loop
   executeDo(line) {
-    const bodyStart = this.lineIndex;
+    // The body starts AFTER the do [ line
+    const bodyStart = this.lineIndex + 1;
     const bodyEnd = this.findClosingBracket(this.lineIndex);
     
     // CRITICAL: Find the "while (condition)" - it's often on the same line as ]
@@ -2390,7 +2575,8 @@ export class TinyCInterpreter {
       console.error('[DO-WHILE] Could not find while condition after do block!');
       console.error('Body end line', bodyEnd, ':', this.lines[bodyEnd]);
       console.error('Next line', bodyEnd + 1, ':', this.lines[bodyEnd + 1]);
-      this.lineIndex = bodyEnd + 1;
+      // Advance past the closing bracket to avoid infinite loop
+      this.lineIndex = bodyEnd + (whileLineIndex > bodyEnd ? whileLineIndex : bodyEnd + 1);
       return false;
     }
     
@@ -2414,19 +2600,41 @@ export class TinyCInterpreter {
         break;
       }
       
-      // Execute loop body from bodyStart to bodyEnd
+      // Execute loop body from bodyStart to just before bodyEnd (which contains "])
       this.lineIndex = bodyStart;
       this.shouldBreak = false;
       this.shouldContinue = false;
       
-      while (this.lineIndex <= bodyEnd) {
+      if (iterations === 1) {
+        console.log('[DO-WHILE-BODY] First iteration - executing lines', bodyStart, 'to', bodyEnd - 1);
+        console.log('[DO-WHILE-BODY] Variables before: k=', this.variables.k, 'b=', this.variables.b, 'i=', this.variables.i, 'seed=', this.variables.seed);
+      }
+      
+      while (this.lineIndex < bodyEnd) {
         const currentLine = this.lines[this.lineIndex];
-        this.lineIndex++;
+        const currentLineNum = this.lineIndex;
         
         const trimmed = currentLine.trim();
-        if (trimmed === '' || trimmed.startsWith('/*') || trimmed === '[' || trimmed === ']') continue;
+        if (trimmed === '' || trimmed.startsWith('/*') || trimmed === '[' || trimmed === ']') {
+          this.lineIndex++;
+          continue;
+        }
         
+        if (iterations === 1) {
+          console.log('[DO-WHILE-BODY] Line', currentLineNum, ':', trimmed);
+        }
+        
+        // Execute the line - if it's a control structure (for, while, if), 
+        // it will update lineIndex to point to the end of its block
         const shouldWait = this.executeLine(trimmed);
+        
+        // After executeLine, lineIndex might have been updated by nested control structures
+        // Don't increment if it was already moved forward
+        const lineWasUpdated = this.lineIndex !== currentLineNum;
+        if (!lineWasUpdated) {
+          this.lineIndex++;
+        }
+        
         if (shouldWait) {
           this.loopState = {
             type: 'do-while',
@@ -2452,15 +2660,27 @@ export class TinyCInterpreter {
       
       if (this.shouldBreak) break;
       
+      if (iterations === 1) {
+        console.log('[DO-WHILE-BODY] After first iteration - k=', this.variables.k, 'b=', this.variables.b, 'i=', this.variables.i);
+      }
+      
       // Now evaluate the condition (like the C code does after st())
       continueLoop = this.evaluateCondition(condition);
       console.log('Do-while condition:', condition, '=', continueLoop);
     }
     
-    // Jump past the while line
-    this.lineIndex = whileLineIndex + 1;
+    // Jump past the while condition line - if condition was on same line as ], 
+    // then jump to next line after bodyEnd, otherwise jump past the while line
+    // IMPORTANT: We need to set lineIndex to the line BEFORE the one we want to execute next,
+    // because continueExecution will do lineIndex++ after this returns
+    if (closingLine.includes('while')) {
+      this.lineIndex = bodyEnd; // Will be incremented to bodyEnd + 1
+    } else {
+      this.lineIndex = whileLineIndex; // Will be incremented to whileLineIndex + 1
+    }
     this.shouldBreak = false;
     this.inLoop = savedInLoop;
+    console.log('[DO-WHILE] Loop completed, lineIndex set to', this.lineIndex);
     return false;
   }
   
@@ -2488,7 +2708,7 @@ export class TinyCInterpreter {
     // For single-line body, execute only the next line
     // For bracketed body, execute from line after [ to line before ]
     const loopStart = this.lineIndex + 1;
-    const loopEnd = hasBracket ? this.findClosingBracket(this.lineIndex - 1) : this.lineIndex + 1;
+    const loopEnd = hasBracket ? this.findClosingBracket(this.lineIndex) : this.lineIndex + 1;
     
     // For loop range: loopStart to loopEnd
     

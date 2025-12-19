@@ -452,7 +452,7 @@ function App() {
       <div className="editor-container">
         <div className="panel editor-panel">
           <h2>Code Editor</h2>
-          <CodeEditor value={code} onChange={setCode} disabled={isRunning} />
+          <CodeEditor value={code} onChange={setCode} disabled={false} />
         </div>
         
         <div className="panel output-panel">
