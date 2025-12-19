@@ -1,0 +1,11 @@
+/* Simple test program */
+main [
+  ps "Hello from TinyC CLI!"
+  MC 13,1;MC 10,1
+  ps "Enter a number: "
+  int x
+  x = gn()
+  ps "You entered: "
+  pn x
+  MC 13,1;MC 10,1
+]

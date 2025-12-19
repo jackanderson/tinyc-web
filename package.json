@@ -6,7 +6,8 @@
   "scripts": {
     "dev": "vite",
     "build": "vite build",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "cli": "node tinyc-cli.js"
   },
   "dependencies": {
     "ace-builds": "^1.43.5",
