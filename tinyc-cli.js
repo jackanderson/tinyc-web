@@ -26,37 +26,58 @@ const { TinyCInterpreter } = await import('./src/interpreter/TinyCInterpreter.js
 import * as readline from 'readline';
 import { readFileSync } from 'fs';
 import { stdin, stdout, exit } from 'process';
+import { fileURLToPath } from 'url';
+import { dirname, join } from 'path';
+
+// Get directory of current module for loading IPL
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = dirname(__filename);
 
 class TinyCCLI {
   constructor() {
     this.interpreter = new TinyCInterpreter();
     this.rl = null;
     this.isExecuting = false;
+    this.loadIPL();
+  }
+
+  // Load the IPL standard library
+  loadIPL() {
+    try {
+      const iplPath = join(__dirname, 'tinycx.ipl');
+      const iplCode = readFileSync(iplPath, 'utf-8');
+      this.interpreter.loadIPL(iplCode);
+      if (debug) {
+        console.log('IPL library loaded from tinycx.ipl');
+      }
+    } catch (error) {
+      if (debug) {
+        console.warn('Warning: Could not load IPL library:', error.message);
+        console.warn('IPL functions may not be available');
+      }
+    }
   }
 
   // Override the interpreter's output methods to write directly to stdout
   setupOutputHandlers() {
-    // Store original methods
-    const originalPrint = this.interpreter.print.bind(this.interpreter);
-    const originalPrintln = this.interpreter.println.bind(this.interpreter);
-    const originalRequestInput = this.interpreter.requestInput.bind(this.interpreter);
-
-    // Override print to write directly to stdout
+    // Override print to write directly to stdout without calling original
     this.interpreter.print = (text) => {
       stdout.write(String(text));
-      originalPrint(text);
+      // Don't call original - it causes duplication
     };
 
-    // Override println to write directly to stdout
+    // Override println to write directly to stdout without calling original
     this.interpreter.println = (text = '') => {
       stdout.write(String(text) + '\n');
-      originalPrintln(text);
+      // Don't call original - it causes duplication
     };
 
-    // Override requestInput to use readline
+    // Override requestInput to set flags and prompt without calling original
     this.interpreter.requestInput = (prompt = '') => {
       stdout.write(prompt);
-      originalRequestInput(prompt);
+      // Set waiting state directly instead of calling original
+      this.interpreter.waitingForInput = true;
+      this.interpreter.inputPrompt = prompt;
       this.waitForInput();
     };
   }

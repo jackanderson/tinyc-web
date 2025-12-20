@@ -40,6 +40,11 @@ export class TinyCInterpreter {
     this.errorCode = 0;  // Error code like original TinyC
     this.errorFunction = null;  // Function name that caused error
     this.errorLine = -1;  // Line number where error occurred
+    // Don't reset iplLibrary - preserve it across resets
+    if (!this.iplLibrary) this.iplLibrary = '';  // Initialize only if undefined
+    if (!this.iplLines) this.iplLines = [];  // Preserve IPL code lines
+    if (!this.iplFunctions) this.iplFunctions = {};  // Preserve IPL function definitions
+    this.iplLoaded = false;  // Track if IPL has been loaded
   }
   
   // Output functions
@@ -104,6 +109,7 @@ export class TinyCInterpreter {
     
     // The mcNumber parameter IS the MC operation number (passed from executeLine)
     // Data should already be on the stack before calling this function
+    // Returns true if waiting for input, false otherwise
     
     // User-defined machine calls (>= 1000)
     if (mcNumber >= 1000) {
@@ -208,11 +214,41 @@ export class TinyCInterpreter {
         if (this.inputQueue.length === 0) {
           this.requestInput('');
           this.waitingForInput = true;
+          break;
         } else {
-          const line = this.getInput();
-          // In original, this would store to buffer address from stack
-          const buffer = this.pop();
-          this.push(line ? line.length : 0); // Return length
+          const line = this.getInput() || '';
+          console.log(`[MC 15 GETLN] Read input: "${line}"`);
+          // Parse buffer address from the expression (should be like "b" or "buf")
+          // The MC call is "MC b,15" where b is the buffer variable
+          // We need to extract the buffer name from the original expression
+          // For now, we'll store it in a temporary variable and return the string
+          // Actually, the buffer address is passed as first argument to MC
+          // We need to write the input string to the buffer array
+          const bufferAddr = this.pop();
+          console.log(`[MC 15 GETLN] Buffer address: "${bufferAddr}" (type: ${typeof bufferAddr})`);
+          
+          // Try to find the array variable that this address refers to
+          // In TinyC, arrays are passed by reference (their starting address)
+          // We need to write each character of the line to the array
+          if (typeof bufferAddr === 'string') {
+            // It's a variable name - write to that array
+            const arrayName = bufferAddr;
+            console.log(`[MC 15 GETLN] Looking for array: "${arrayName}", exists: ${!!this.arrays[arrayName]}`);
+            if (this.arrays[arrayName]) {
+              for (let i = 0; i < line.length; i++) {
+                this.arrays[arrayName][i] = line.charCodeAt(i);
+              }
+              this.arrays[arrayName][line.length] = 0; // Null terminator
+              console.log(`[MC 15 GETLN] Wrote "${line}" to array ${arrayName}`);
+            } else {
+              console.warn(`[MC 15 GETLN] Array "${arrayName}" not found in this.arrays`);
+            }
+          } else if (typeof bufferAddr === 'number') {
+            // It's a numeric address - this shouldn't happen in our simplified implementation
+            console.warn('[MC 15 GETLN] received numeric buffer address:', bufferAddr);
+          }
+          
+          this.push(line.length); // Return length
         }
         break;
       }
@@ -277,6 +313,7 @@ export class TinyCInterpreter {
         this.push(0);
       }
     }
+    return this.waitingForInput || false;
   }
   
   // Strip single-line /* comments from a line
@@ -288,9 +325,66 @@ export class TinyCInterpreter {
     return line;
   }
 
+  // Load IPL library (standard library functions)
+  loadIPL(iplCode) {
+    if (this.iplLoaded) return; // Already loaded
+    
+    console.log('Loading IPL library...');
+    this.iplLibrary = iplCode;
+    
+    // Find the 'endlibrary' marker and only use code before it
+    const endLibraryIndex = iplCode.indexOf('endlibrary');
+    let libraryCode = iplCode;
+    if (endLibraryIndex !== -1) {
+      // Extract only the library portion (before 'endlibrary')
+      libraryCode = iplCode.substring(0, endLibraryIndex);
+      console.log('IPL library ends at endlibrary marker');
+    }
+    
+    // Parse the IPL library to extract function definitions
+    // We don't execute it, just collect the function definitions
+    const savedCode = this.code;
+    const savedLines = this.lines;
+    const savedLineIndex = this.lineIndex;
+    const savedFunctions = { ...this.functions };
+    const savedVariables = { ...this.variables };
+    const savedArrays = { ...this.arrays };
+    
+    this.code = libraryCode;
+    this.lines = libraryCode.split('\n').map(line => this.stripComment(line));
+    this.lineIndex = 0;
+    
+    // Collect IPL function definitions
+    this.collectDefinitions();
+    
+    console.log('IPL functions loaded:', Object.keys(this.functions).length);
+    console.log('IPL function names:', Object.keys(this.functions).join(', '));
+    
+    // Store IPL lines and functions separately
+    this.iplLines = this.lines;
+    this.iplFunctions = this.functions;
+    const iplVariables = this.variables;
+    const iplArrays = this.arrays;
+    
+    this.code = savedCode;
+    this.lines = savedLines;
+    this.lineIndex = savedLineIndex;
+    this.functions = { ...savedFunctions, ...this.iplFunctions };
+    this.variables = { ...savedVariables, ...iplVariables };
+    this.arrays = { ...savedArrays, ...iplArrays };
+    
+    this.iplLoaded = true;
+  }
+  
   // Execute a tiny-c program
   execute(code) {
     this.reset();
+    
+    // If IPL library was set but not loaded into this reset instance, load it
+    if (this.iplLibrary && !this.iplLoaded) {
+      this.loadIPL(this.iplLibrary);
+    }
+    
     this.code = code;
     // Strip comments from each line before splitting
     this.lines = code.split('\n').map(line => this.stripComment(line));
@@ -298,6 +392,7 @@ export class TinyCInterpreter {
     
     try {
       // First pass: collect function definitions and global variables
+      console.log('[EXECUTE] Calling collectDefinitions(), code length:', this.lines.length);
       this.collectDefinitions();
       
       console.log('Functions found:', Object.keys(this.functions));
@@ -337,20 +432,25 @@ export class TinyCInterpreter {
         
         // Global variable declarations
         if (!inFunction && (trimmed.startsWith('int ') || trimmed.startsWith('char '))) {
+          console.log(`[COLLECT-DEF] Line ${i}: "${trimmed}" (inFunction=${inFunction})`);
           this.parseGlobalVarDeclaration(trimmed);
           continue;
         }
         
         // Function definition: name [...] or name type params [...]
-        const funcMatch = trimmed.match(/^(\w+)(?:\s+[\w\s,()]+)?\s*\[/);
+        // Need to include ; to match functions like: index char i(0);int l;char f(0);int n[
+        // But be careful not to match control structures
+        const funcMatch = trimmed.match(/^(\w+)(?:\s+[\w\s,();]+)?\s*\[/);
         if (funcMatch && !inFunction) {
           const funcName = funcMatch[1];
+          console.log(`[FUNC-START] Line ${i}: Found function "${funcName}"`);
           // Don't treat standalone control structures as functions
           if (['if', 'else', 'while', 'for', 'do'].includes(funcName)) {
+            console.log(`[FUNC-START] Skipping control structure "${funcName}"`);
             continue;
           }
           inFunction = true;
-          bracketDepth = 1;
+          bracketDepth = 0; // Start at 0, we'll count the brackets in the loop below
           this.functions[funcName] = { startLine: i, endLine: -1 };
           // Don't continue - we need to count brackets on this line too!
         }
@@ -393,6 +493,7 @@ export class TinyCInterpreter {
         const name = arrayMatch[1];
         const size = parseInt(arrayMatch[2]);
         this.arrays[name] = new Array(size).fill(0);
+        console.log(`[GLOBAL-ARRAY] Created array ${name} with size ${size}`);
       } else {
         // Simple variable
         const varName = trimmed.replace(/[;\]]$/, '').trim();
@@ -531,13 +632,36 @@ export class TinyCInterpreter {
     
     // Handle local variable declarations (int x, char buf(20))
     if (line.startsWith('int ') || line.startsWith('char ')) {
-      this.parseGlobalVarDeclaration(line);
-      return false;
+      // Check if there's more code after the declaration (separated by ;)
+      const semiIndex = line.indexOf(';');
+      if (semiIndex !== -1) {
+        // Split: declaration before semicolon, rest after
+        const declPart = line.substring(0, semiIndex).trim();
+        const restPart = line.substring(semiIndex + 1).trim();
+        
+        console.log(`[LOCAL-DECL] Declaring: "${declPart}"`);
+        this.parseGlobalVarDeclaration(declPart);
+        console.log(`[LOCAL-DECL] After declaring, arrays:`, Object.keys(this.arrays));
+        
+        // Execute the rest of the line
+        if (restPart) {
+          return this.executeLine(restPart);
+        }
+        return false;
+      } else {
+        console.log(`[LOCAL-DECL] Declaring: "${line}"`);
+        this.parseGlobalVarDeclaration(line);
+        console.log(`[LOCAL-DECL] After declaring, arrays:`, Object.keys(this.arrays));
+        return false;
+      }
     }
     
     // Handle multiple statements on one line separated by semicolons
-    // BUT: Don't split for/while/if statements which have semicolons in their syntax
-    if (line.includes(';') && !line.includes('"') && !line.match(/^(for|while|if)\s*\(/)) {
+    // BUT: Don't split for/while loops which have semicolons in their header syntax
+    // Also don't split if there are string literals (double quotes), but character literals (single quotes) are OK
+    // Only skip splitting for 'for' loops that have semicolons in the header
+    // Allow splitting lines that start with 'if' or 'while' even if they contain semicolons
+    if (line.includes(';') && !/("[^"]*")/.test(line) && !line.match(/^for\s*\([^)]*;/)) {
       const statements = line.split(';').map(s => s.trim()).filter(s => s);
       for (const stmt of statements) {
         const shouldWait = this.executeLine(stmt);
@@ -551,7 +675,9 @@ export class TinyCInterpreter {
     // Check for return statement
     if (line.startsWith('return ')) {
       const expr = line.substring(7);
+      console.log(`[RETURN] Evaluating expression: "${expr}"`);
       this.returnValue = this.evaluateExpression(expr);
+      console.log(`[RETURN] Result: ${this.returnValue}`);
       this.shouldReturn = true;
       return false;
     }
@@ -627,6 +753,16 @@ export class TinyCInterpreter {
       return this.executeFunction(line);
     }
     
+    // User-defined function calls without parentheses (e.g., "gs b" or "funcname arg1")
+    // Check if line starts with a known function name followed by space and an argument
+    const noParenMatch = line.match(/^(\w+)\s+(\w+)$/);
+    if (noParenMatch && this.functions[noParenMatch[1]]) {
+      const funcName = noParenMatch[1];
+      const arg = noParenMatch[2];
+      console.log(`[FUNC-CALL-NOPAREN] Calling ${funcName}(${arg})`);
+      return this.executeFunction(`${funcName}(${arg})`);
+    }
+    
     // Standard library calls without parens
     if (line.startsWith('pl ')) {
       const match = line.match(/pl\s+"([^"]*)"/);
@@ -653,17 +789,25 @@ export class TinyCInterpreter {
     
     // Handle MC (Machine Call) - Machine calls from original tiny-c
     if (line.trim().startsWith('MC ')) {
-      const match = line.match(/MC\s+(\d+),(\d+)/);
+      console.log('[MC-LINE] Matched MC line:', line);
+      // Match MC value,operation where value can be a variable or number (with optional spaces)
+      const match = line.match(/MC\s+([^,]+),\s*(\d+)/);
       if (match) {
-        const value = parseInt(match[1]);
+        console.log('[MC-LINE] Matched MC pattern:', match[0], 'value:', match[1], 'op:', match[2]);
+        const valueExpr = match[1].trim();
         const argCount = parseInt(match[2]);
+        // Evaluate the first parameter (could be variable or expression)
+        const value = this.evaluateExpression(valueExpr);
+        console.log('[MC-LINE] Evaluated value:', value, 'calling executeMC with op:', argCount);
         // In tiny-c: MC pushes a value, then the argCount determines what MC operation to perform
         // argCount is actually the MC operation code!
         // The value is pushed as data
         this.push(value);
-        this.executeMC(argCount);
+        const isWaiting = this.executeMC(argCount);
+        return isWaiting; // Return true if MC operation is waiting for input
       }
-      return false; // MC operations are synchronous, don't wait
+      console.log('[MC-LINE] FAILED to match MC pattern for:', line);
+      return false;
     }
     
     if (line.startsWith('ps ')) {
@@ -690,7 +834,10 @@ export class TinyCInterpreter {
     if (line.startsWith('pn ')) {
       const match = line.match(/pn\s+(.+)/);
       if (match) {
-        const value = this.evaluateExpression(match[1]);
+        const expr = match[1];
+        console.log(`[PN-EVAL] Evaluating: "${expr}"`);
+        const value = this.evaluateExpression(expr);
+        console.log(`[PN-EVAL] Result: ${value}`);
         this.print(' ' + value);
       }
       return false;
@@ -709,7 +856,17 @@ export class TinyCInterpreter {
     }
     
     // Variable or array assignment (allow leading whitespace)
-    const assignMatch = line.match(/^\s*(\w+)(?:\s*\((\d+)\))?\s*=\s*(.+)/);
+    // Match: varname = expr  OR  varname(index_expr) = expr
+    // The index can be any expression, not just digits
+    const assignMatch = line.match(/^\s*(\w+)(?:\s*\(([^)]+)\))?\s*=\s*(.+)/);
+    
+    // Debug array assignments
+    if (line.includes('z(') && line.includes('=')) {
+      console.log(`[DEBUG-ASSIGN] Line: "${line}", assignMatch: ${assignMatch ? 'YES' : 'NO'}`);
+      if (assignMatch) {
+        console.log(`[DEBUG-ASSIGN] Matched: varName="${assignMatch[1]}", indexExpr="${assignMatch[2]}", expr="${assignMatch[3]}"`);
+      }
+    }
     
     // DEBUG: ULTRA-VERBOSE - Log EVERY line that starts with 'j'
     const trimmedLine = line.trim();
@@ -719,7 +876,7 @@ export class TinyCInterpreter {
     
     if (assignMatch) {
       const varName = assignMatch[1];
-      const arrayIndex = assignMatch[2];
+      const arrayIndexExpr = assignMatch[2]; // This is now an expression, not just digits
       const expr = assignMatch[3];
       
       // Debug: log when we match j assignment
@@ -734,8 +891,9 @@ export class TinyCInterpreter {
           const input = this.getInput();
           this.print(input + '\n');
           const value = parseInt(input);
-          if (arrayIndex !== undefined) {
-            this.arrays[varName][parseInt(arrayIndex)] = value;
+          if (arrayIndexExpr !== undefined) {
+            const index = this.evaluateExpression(arrayIndexExpr);
+            this.arrays[varName][parseInt(index)] = value;
           } else {
             this.variables[varName] = value;
           }
@@ -755,13 +913,14 @@ export class TinyCInterpreter {
           const input = this.getInput();
           this.print(input + '\n');
           const value = input.charAt(0).charCodeAt(0);
-          if (arrayIndex !== undefined) {
-            this.arrays[varName][parseInt(arrayIndex)] = value;
+          if (arrayIndexExpr !== undefined) {
+            const index = this.evaluateExpression(arrayIndexExpr);
+            this.arrays[varName][parseInt(index)] = value;
           } else {
             this.variables[varName] = value;
           }
           console.log(`[GETCMD] Returned: '${input.charAt(0)}' (${value}) to variable ${varName}`);
-          
+
           // Special debugging for Trek main loop variables after getcmd
           if (varName === 'cc') {
             console.log(`[GETCMD-TREK] After setting cc=${value}: e=${this.variables.e}, d=${this.variables.d}, k=${this.variables.k}`);
@@ -790,9 +949,10 @@ export class TinyCInterpreter {
         }
         
         const value = this.returnValue || 0;
-        
-        if (arrayIndex !== undefined) {
-          this.arrays[varName][parseInt(arrayIndex)] = value;
+
+        if (arrayIndexExpr !== undefined) {
+          const index = this.evaluateExpression(arrayIndexExpr);
+          this.arrays[varName][parseInt(index)] = value;
         } else {
           this.variables[varName] = value;
         }
@@ -812,8 +972,9 @@ export class TinyCInterpreter {
         
         // Assign to both variables
         this.variables[innerVar] = value;
-        if (arrayIndex !== undefined) {
-          this.arrays[varName][parseInt(arrayIndex)] = value;
+        if (arrayIndexExpr !== undefined) {
+          const index = this.evaluateExpression(arrayIndexExpr);
+          this.arrays[varName][parseInt(index)] = value;
         } else {
           this.variables[varName] = value;
         }
@@ -834,9 +995,11 @@ export class TinyCInterpreter {
       if (varName === 'j') {
         console.log(`[ASSIGNMENT-AFTER] j = ${expr} => evaluated to ${value}, seed=${this.variables.seed}`);
       }
-      
-      if (arrayIndex !== undefined) {
-        this.arrays[varName][parseInt(arrayIndex)] = value;
+
+      if (arrayIndexExpr !== undefined) {
+        const index = this.evaluateExpression(arrayIndexExpr);
+        console.log(`[ARRAY-ASSIGN] Assigning to array ${varName}[${index}] = ${value}, array exists: ${!!this.arrays[varName]}`);
+        this.arrays[varName][parseInt(index)] = value;
       } else {
         this.variables[varName] = value;
       }
@@ -848,11 +1011,30 @@ export class TinyCInterpreter {
   
   // Execute a function call
   executeFunction(line) {
-    const match = line.match(/^(\w+)\s*\(([^)]*)\)/);
-    if (!match) return false;
+    // Parse function call with support for nested parentheses
+    const funcMatch = line.match(/^(\w+)\s*\(/);
+    if (!funcMatch) return false;
     
-    const funcName = match[1];
-    const argsStr = match[2];
+    const funcName = funcMatch[1];
+    const startIdx = funcMatch[0].length; // Position after "funcName("
+    
+    // Find matching closing paren by counting depth
+    let depth = 1;
+    let endIdx = startIdx;
+    while (endIdx < line.length && depth > 0) {
+      if (line[endIdx] === '(') depth++;
+      else if (line[endIdx] === ')') depth--;
+      if (depth > 0) endIdx++;
+    }
+    
+    const argsStr = line.substring(startIdx, endIdx);
+
+    // Check for user-defined functions FIRST (including IPL functions)
+    if (this.functions[funcName]) {
+      // Parse and evaluate arguments
+      const args = argsStr ? argsStr.split(',').map(a => this.evaluateExpression(a.trim())) : [];
+      return this.executeUserFunction(funcName, args);
+    }
     
     // Built-in functions (only if not user-defined)
     if (funcName === 'version') {
@@ -908,7 +1090,9 @@ export class TinyCInterpreter {
     
     // pn() - print number with parameter
     if (funcName === 'pn') {
+      console.log(`[PN-FUNC] Evaluating argsStr: "${argsStr}"`);
       const value = this.evaluateExpression(argsStr);
+      console.log(`[PN-FUNC] Result: ${value}`);
       this.print(' ' + value);
       return false;
     }
@@ -941,518 +1125,8 @@ export class TinyCInterpreter {
       }
     }
 
-    // putchar() - output single character
-    if (funcName === 'putchar') {
-      const value = this.evaluateExpression(argsStr);
-      if (value === 0) {
-        this.print('"');
-      } else {
-        this.print(String.fromCharCode(value));
-      }
-      return false;
-    }
-
-    // getchar() - input single character
-    if (funcName === 'getchar') {
-      if (this.inputQueue.length > 0) {
-        const input = this.getInput();
-        this.returnValue = input.length > 0 ? input.charCodeAt(0) : 0;
-        return false;
-      } else {
-        this.requestInput('');
-        return true;
-      }
-    }
-
-    // chrdy() - check if character ready
-    if (funcName === 'chrdy') {
-      this.returnValue = this.inputQueue.length > 0 ? 1 : 0;
-      return false;
-    }
-
-    // gc() - get character (same as getchar but different name)
-    if (funcName === 'gc') {
-      if (this.inputQueue.length > 0) {
-        const input = this.getInput();
-        this.returnValue = input.length > 0 ? input.charCodeAt(0) : 0;
-        return false;
-      } else {
-        this.requestInput('');
-        return true;
-      }
-    }
-
-    // gn() - get number input
-    if (funcName === 'gn') {
-      if (this.inputQueue.length > 0) {
-        const input = this.getInput();
-        const value = parseInt(input) || 0;
-        this.returnValue = value;
-        return false;
-      } else {
-        this.requestInput('number required ');
-        return true;
-      }
-    }
-
-    // alphanum() - check if character is alphanumeric
-    if (funcName === 'alphanum') {
-      const charCode = this.evaluateExpression(argsStr);
-      const char = String.fromCharCode(charCode);
-      const isAlphaNum = /[a-zA-Z0-9_]/.test(char);
-      this.returnValue = isAlphaNum ? 1 : 0;
-      return false;
-    }
-
-    // strlen() - string length
-    if (funcName === 'strlen') {
-      const arrayParam = argsStr.trim();
-      if (this.arrays[arrayParam]) {
-        let len = 0;
-        while (len < this.arrays[arrayParam].length && this.arrays[arrayParam][len] !== 0) {
-          len++;
-        }
-        this.returnValue = len;
-      } else {
-        this.returnValue = 0;
-      }
-      return false;
-    }
-
-    // strcat() - string concatenate
-    if (funcName === 'strcat') {
-      const args = argsStr.split(',').map(a => a.trim());
-      if (args.length >= 2) {
-        const dest = args[0];
-        const src = args[1];
-        if (this.arrays[dest] && this.arrays[src]) {
-          // Find end of dest string
-          let destLen = 0;
-          while (destLen < this.arrays[dest].length && this.arrays[dest][destLen] !== 0) {
-            destLen++;
-          }
-          // Append src to dest
-          let srcIdx = 0;
-          while (srcIdx < this.arrays[src].length && this.arrays[src][srcIdx] !== 0) {
-            this.arrays[dest][destLen + srcIdx] = this.arrays[src][srcIdx];
-            srcIdx++;
-          }
-          this.arrays[dest][destLen + srcIdx] = 0; // null terminate
-        }
-      }
-      return false;
-    }
-
-    // strcpy() - string copy
-    if (funcName === 'strcpy') {
-      const args = argsStr.split(',').map(a => a.trim());
-      if (args.length >= 2) {
-        const dest = args[0];
-        const src = args[1];
-        if (this.arrays[dest] && this.arrays[src]) {
-          let idx = 0;
-          while (idx < this.arrays[src].length && this.arrays[src][idx] !== 0) {
-            this.arrays[dest][idx] = this.arrays[src][idx];
-            idx++;
-          }
-          this.arrays[dest][idx] = 0; // null terminate
-        }
-      }
-      return false;
-    }
-
-    // tolower() - convert string to lowercase
-    if (funcName === 'tolower') {
-      const arrayParam = argsStr.trim();
-      if (this.arrays[arrayParam]) {
-        for (let i = 0; i < this.arrays[arrayParam].length && this.arrays[arrayParam][i] !== 0; i++) {
-          const char = this.arrays[arrayParam][i];
-          if (char >= 65 && char <= 90) { // A-Z
-            this.arrays[arrayParam][i] = char + 32; // Convert to lowercase
-          }
-        }
-      }
-      return false;
-    }
-
-    // toupper() - convert string to uppercase
-    if (funcName === 'toupper') {
-      const arrayParam = argsStr.trim();
-      if (this.arrays[arrayParam]) {
-        for (let i = 0; i < this.arrays[arrayParam].length && this.arrays[arrayParam][i] !== 0; i++) {
-          const char = this.arrays[arrayParam][i];
-          if (char >= 97 && char <= 122) { // a-z
-            this.arrays[arrayParam][i] = char - 32; // Convert to uppercase
-          }
-        }
-      }
-      return false;
-    }
-
-    // sak() - strike any key (prompt and wait for input)
-    if (funcName === 'sak') {
-      if (this.inputQueue.length > 0) {
-        this.getInput(); // consume the input
-        this.returnValue = 0;
-        return false;
-      } else {
-        this.requestInput('Press Enter ... ');
-        return true;
-      }
-    }
-
-    // exit() - exit program
-    if (funcName === 'exit') {
-      this.halted = true;
-      return false;
-    }
-
-    // Terminal control functions (simple implementations for web)
-    if (funcName === 'cls') {
-      this.output = []; // Clear screen by clearing output
-      return false;
-    }
-
-    if (funcName === 'beep') {
-      const args = argsStr.split(',').map(a => this.evaluateExpression(a.trim()));
-      const frequency = args[0] || 800; // Default frequency
-      const duration = args[1] || 200;  // Default duration in milliseconds
-      
-      try {
-        // Create Web Audio context if it doesn't exist
-        if (!this.audioContext) {
-          this.audioContext = new (window.AudioContext || window.webkitAudioContext)();
-        }
-        
-        // Create oscillator for the tone
-        const oscillator = this.audioContext.createOscillator();
-        const gainNode = this.audioContext.createGain();
-        
-        // Connect oscillator -> gain -> output
-        oscillator.connect(gainNode);
-        gainNode.connect(this.audioContext.destination);
-        
-        // Set frequency and waveform
-        oscillator.frequency.setValueAtTime(frequency, this.audioContext.currentTime);
-        oscillator.type = 'sine'; // Pure sine wave tone
-        
-        // Set volume envelope (fade in/out to avoid clicks)
-        const now = this.audioContext.currentTime;
-        const durationSec = duration / 1000;
-        
-        gainNode.gain.setValueAtTime(0, now);
-        gainNode.gain.linearRampToValueAtTime(0.1, now + 0.01); // Fade in
-        gainNode.gain.setValueAtTime(0.1, now + durationSec - 0.01); // Hold
-        gainNode.gain.linearRampToValueAtTime(0, now + durationSec); // Fade out
-        
-        // Start and stop the tone
-        oscillator.start(now);
-        oscillator.stop(now + durationSec);
-        
-      } catch (error) {
-        console.warn('Web Audio not supported or error generating beep:', error);
-        // Fallback to bell character if Web Audio fails
-        this.print('\a');
-      }
-      
-      return false;
-    }
-
-    // Cursor control functions (no-op for web)
-    if (['cnormal', 'chide', 'csolid', 'on', 'off', 'solid'].includes(funcName)) {
-      return false; // No-op
-    }
-
-    // Color and positioning (simplified for web)
-    if (funcName === 'color' || funcName === 'hilo' || funcName === 'oo') {
-      return false; // No-op
-    }
-
-    if (funcName === 'posc') {
-      return false; // No-op for web
-    }
-
-    // File operations (simplified - not implemented in web version)
-    if (['readfile', 'writefile', 'fopen', 'fread', 'fwrite', 'fclose'].includes(funcName)) {
-      this.returnValue = -1; // File operations not supported
-      return false;
-    }
-
-    // num() - convert string buffer to number
-    if (funcName === 'num') {
-      const args = argsStr.split(',').map(a => a.trim());
-      if (args.length >= 2) {
-        const bufferName = args[0];
-        const valueName = args[1];
-        if (this.arrays[bufferName]) {
-          let numStr = '';
-          let k = 0;
-          // Read up to 5 digits
-          while (k < 5 && k < this.arrays[bufferName].length) {
-            const charCode = this.arrays[bufferName][k];
-            const char = String.fromCharCode(charCode);
-            if (char >= '0' && char <= '9') {
-              numStr += char;
-            } else {
-              break;
-            }
-            k++;
-          }
-          // Set the value variable
-          if (this.variables[valueName] !== undefined) {
-            this.variables[valueName] = parseInt(numStr) || 0;
-          }
-          this.returnValue = k; // Return number of characters processed
-        } else {
-          this.returnValue = 0;
-        }
-      }
-      return false;
-    }
-
-    // atoi() - ASCII to integer conversion
-    if (funcName === 'atoi') {
-      const args = argsStr.split(',').map(a => a.trim());
-      if (args.length >= 2) {
-        const bufferName = args[0];
-        const valueName = args[1];
-        if (this.arrays[bufferName]) {
-          let numStr = '';
-          let k = 0;
-          let sign = 1;
-          
-          // Skip whitespace and handle sign
-          while (k < this.arrays[bufferName].length) {
-            const char = String.fromCharCode(this.arrays[bufferName][k]);
-            if (char === ' ') {
-              k++;
-            } else if (char === '-') {
-              sign = -1;
-              k++;
-              break;
-            } else if (char === '+') {
-              k++;
-              break;
-            } else {
-              break;
-            }
-          }
-          
-          // Read digits
-          const startK = k;
-          while (k < this.arrays[bufferName].length) {
-            const char = String.fromCharCode(this.arrays[bufferName][k]);
-            if (char >= '0' && char <= '9') {
-              numStr += char;
-              k++;
-            } else {
-              break;
-            }
-          }
-          
-          // Set the value variable
-          if (this.variables[valueName] !== undefined) {
-            this.variables[valueName] = sign * (parseInt(numStr) || 0);
-          }
-          this.returnValue = k; // Return total characters processed
-        } else {
-          this.returnValue = 0;
-        }
-      }
-      return false;
-    }
-
-    // ceqn() - compare equal n characters
-    if (funcName === 'ceqn') {
-      const args = argsStr.split(',').map(a => a.trim());
-      if (args.length >= 3) {
-        const a = args[0];
-        const b = args[1];
-        const n = this.evaluateExpression(args[2]);
-        
-        if (this.arrays[a] && this.arrays[b]) {
-          for (let k = 0; k < n; k++) {
-            if ((this.arrays[a][k] || 0) !== (this.arrays[b][k] || 0)) {
-              this.returnValue = 0;
-              return false;
-            }
-          }
-          this.returnValue = 1;
-        } else {
-          this.returnValue = 0;
-        }
-      }
-      return false;
-    }
-
-    // index() - find substring in string
-    if (funcName === 'index') {
-      const args = argsStr.split(',').map(a => a.trim());
-      if (args.length >= 4) {
-        const haystack = args[0]; // string to search in
-        const l = this.evaluateExpression(args[1]); // length of haystack
-        const needle = args[2]; // string to find
-        const n = this.evaluateExpression(args[3]); // length of needle
-        
-        if (n <= 0) {
-          this.returnValue = 1;
-          return false;
-        }
-        if (l <= 0) {
-          this.returnValue = 0;
-          return false;
-        }
-        
-        if (this.arrays[haystack] && this.arrays[needle]) {
-          // Search for needle in haystack
-          for (let a = 0; a + n <= l; a++) {
-            let match = true;
-            for (let i = 0; i < n; i++) {
-              if ((this.arrays[haystack][a + i] || 0) !== (this.arrays[needle][i] || 0)) {
-                match = false;
-                break;
-              }
-            }
-            if (match) {
-              this.returnValue = a; // Return position where found
-              return false;
-            }
-          }
-        }
-        this.returnValue = 0; // Not found
-      }
-      return false;
-    }
-
-    // move() - move/copy string data
-    if (funcName === 'move') {
-      const args = argsStr.split(',').map(a => a.trim());
-      if (args.length >= 2) {
-        const source = args[0];
-        const dest = args[1];
-        
-        if (this.arrays[source] && this.arrays[dest]) {
-          let k = 0;
-          // Copy until null terminator or array end
-          while (k < this.arrays[source].length && this.arrays[source][k] !== 0) {
-            if (k < this.arrays[dest].length) {
-              this.arrays[dest][k] = this.arrays[source][k];
-            }
-            k++;
-          }
-          // Null terminate destination
-          if (k < this.arrays[dest].length) {
-            this.arrays[dest][k] = 0;
-          }
-          this.returnValue = k; // Return length copied
-        } else {
-          this.returnValue = 0;
-        }
-      }
-      return false;
-    }
-
-    // movebl() - move block of memory
-    if (funcName === 'movebl') {
-      const args = argsStr.split(',').map(a => a.trim());
-      if (args.length >= 3) {
-        // For web implementation, this is simplified
-        this.returnValue = 1; // Success
-      }
-      return false;
-    }
-
-    // countch() - count characters
-    if (funcName === 'countch') {
-      const args = argsStr.split(',').map(a => a.trim());
-      if (args.length >= 3) {
-        const array = args[0];
-        const endArray = args[1];
-        const searchChar = this.evaluateExpression(args[2]);
-        
-        // Simple implementation - count occurrences of character
-        if (this.arrays[array]) {
-          let count = 0;
-          for (let i = 0; i < this.arrays[array].length && this.arrays[array][i] !== 0; i++) {
-            if (this.arrays[array][i] === searchChar) {
-              count++;
-            }
-          }
-          this.returnValue = count;
-        } else {
-          this.returnValue = 0;
-        }
-      }
-      return false;
-    }
-
-    // scann() - scan for character
-    if (funcName === 'scann') {
-      const args = argsStr.split(',').map(a => a.trim());
-      if (args.length >= 4) {
-        const array = args[0];
-        const endArray = args[1]; 
-        const searchChar = this.evaluateExpression(args[2]);
-        const countVar = args[3];
-        
-        // Simple implementation - find first occurrence
-        if (this.arrays[array]) {
-          for (let i = 0; i < this.arrays[array].length; i++) {
-            if (this.arrays[array][i] === searchChar || this.arrays[array][i] === 0) {
-              this.returnValue = i;
-              return false;
-            }
-          }
-        }
-        this.returnValue = 0;
-      }
-      return false;
-    }
-
-    // memset() - set memory to value
-    if (funcName === 'memset') {
-      const args = argsStr.split(',').map(a => a.trim());
-      if (args.length >= 3) {
-        const array = args[0];
-        const size = this.evaluateExpression(args[1]);
-        const value = this.evaluateExpression(args[2]);
-        
-        if (this.arrays[array]) {
-          for (let i = 0; i < size && i < this.arrays[array].length; i++) {
-            this.arrays[array][i] = value;
-          }
-        }
-      }
-      return false;
-    }
-
-    // pft() - print formatted text (simplified)
-    if (funcName === 'pft') {
-      const args = argsStr.split(',').map(a => a.trim());
-      if (args.length >= 2) {
-        const format = args[0];
-        const text = args[1];
-        // Simple implementation - just print the text
-        if (this.arrays[format] && this.arrays[text]) {
-          let str = '';
-          for (let i = 0; i < this.arrays[text].length && this.arrays[text][i] !== 0; i++) {
-            str += String.fromCharCode(this.arrays[text][i]);
-          }
-          this.print(str);
-        }
-      }
-      return false;
-    }
-    
-    // User-defined function
-    if (this.functions[funcName]) {
-      // Note: arguments should have been parsed already in handleStatement
-      this.executeUserFunction(funcName, []);
-    } else {
-      // Function not found - handle like original TinyC
-      this.handleUndefinedFunction(funcName);
-    }
-    
+    // Function not found - handle like original TinyC
+    this.handleUndefinedFunction(funcName);
     return false;
   }
   
@@ -1462,6 +1136,10 @@ export class TinyCInterpreter {
       this.handleUndefinedFunction(funcName);
       return false;
     }
+    
+    // Check if this is an IPL function - if so, we'll need to switch to IPL lines
+    const isIPLFunction = this.iplFunctions && this.iplFunctions[funcName];
+    let savedLines = null;
     
     console.log('[executeUserFunction] Executing', funcName, 'from lineIndex', this.lineIndex, 'loopState:', this.loopState ? JSON.stringify(this.loopState) : 'none');
     
@@ -1611,8 +1289,37 @@ export class TinyCInterpreter {
       if (this.currentFunction) {
         this.callStack.push({
           functionName: this.currentFunction,
-          lineIndex: this.lineIndex
+          lineIndex: this.lineIndex,
+          // Save local variables and arrays for proper scoping
+          localVariables: { ...this.variables },
+          localArrays: { ...this.arrays }
         });
+      }
+      
+      // Create new local scope for this function
+      // IMPORTANT: Clear local variables/arrays so parameters bind in new scope
+      // Global variables persist, but function-local ones don't
+      const savedGlobalVars = {};
+      const savedGlobalArrays = {};
+      // Preserve only global declarations (from before main execution)
+      // For now, preserve z array and seed variable from trek.tc
+      for (const key in this.variables) {
+        if (['seed', 'a', 'b', 'c', 'd', 'e', 'f', 'g', 'h', 'i', 'j', 'k', 'l', 'm', 'n', 'o', 'p', 'q', 'r', 's', 't', 'u', 'v', 'w', 'x', 'y', 'cc'].includes(key)) {
+          savedGlobalVars[key] = this.variables[key];
+        }
+      }
+      for (const key in this.arrays) {
+        if (['z'].includes(key)) {
+          savedGlobalArrays[key] = this.arrays[key];
+        }
+      }
+      this.variables = { ...savedGlobalVars };
+      this.arrays = { ...savedGlobalArrays };
+      
+      // Check if this is an IPL function - if so, switch to IPL lines
+      if (isIPLFunction) {
+        savedLines = this.lines;
+        this.lines = this.iplLines;
       }
       
       this.currentFunction = funcName;
@@ -1621,35 +1328,95 @@ export class TinyCInterpreter {
       this.shouldReturn = false;
       this.returnValue = null;
       
-      // Parse function signature to get parameter names
-      const funcDefLine = this.lines[func.startLine].trim();
+      // Parse function signature to get parameter names and types
+      const funcDefLine = isIPLFunction ? this.iplLines[func.startLine] : this.lines[func.startLine];
+      if (!funcDefLine) {
+        console.error(`Error: Function ${funcName} has startLine ${func.startLine} but no line exists there. Total lines: ${this.lines.length}, isIPL: ${isIPLFunction}`);
+        this.handleUndefinedFunction(funcName);
+        return false;
+      }
+      const funcDefLineStr = funcDefLine.trim();
       // Match patterns like: funcname type param1, type param2 [
       // or: funcname type param [
-      const paramMatch = funcDefLine.match(/^\w+\s+(.+?)\s*\[/);
+      const paramMatch = funcDefLineStr.match(/^\w+\s+(.+?)\s*\[/);
       if (paramMatch) {
         const paramsStr = paramMatch[1];
-        // Extract parameter names - they come after type keywords
-        // Pattern: "int range" or "char buf(0); int width, num"
-        const paramNames = [];
-        const parts = paramsStr.split(/[;,]/);
+        // Parse parameters: can be "int range", "char buf(0)", "char a(0);int n", "char a(0), b(0);int n"
+        const params = [];
+        const parts = paramsStr.split(';');
+        
         for (const part of parts) {
-          const tokens = part.trim().split(/\s+/);
-          // Last token(s) in each part are the variable names
-          for (let i = 1; i < tokens.length; i++) {
-            const token = tokens[i].replace(/[()0-9]/g, ''); // Remove array notation
-            if (token && !['int', 'char'].includes(token)) {
-              paramNames.push(token);
+          const trimmedPart = part.trim();
+          if (!trimmedPart) continue;
+          
+          // Determine type: int or char
+          let currentType = '';
+          if (trimmedPart.startsWith('int ')) currentType = 'int';
+          else if (trimmedPart.startsWith('char ')) currentType = 'char';
+          else continue; // Skip if no type keyword
+          
+          // Remove type keyword and parse variable declarations
+          const declsStr = trimmedPart.substring(currentType.length).trim();
+          const decls = declsStr.split(',');
+          
+          for (const decl of decls) {
+            const d = decl.trim();
+            // Check if it's an array: name(size)
+            const arrayMatch = d.match(/(\w+)\s*\((\d+)\)/);
+            if (arrayMatch) {
+              params.push({ name: arrayMatch[1], type: currentType, isArray: true, size: parseInt(arrayMatch[2]) });
+            } else if (d) {
+              // Simple variable
+              params.push({ name: d, type: currentType, isArray: false });
             }
           }
         }
         
-        // Set parameter values as variables (just overwrite - no local scope in tiny-c)
-        for (let i = 0; i < paramNames.length && i < args.length; i++) {
-          this.variables[paramNames[i]] = args[i];
+        console.log(`[PARAM-PARSE] Function ${funcName} parameters:`, params);
+        
+        // Bind parameters to arguments
+        for (let i = 0; i < params.length && i < args.length; i++) {
+          const param = params[i];
+          const arg = args[i];
+          
+          if (param.isArray) {
+            // Array parameter: arg should be a reference (array object, string name, or string literal)
+            if (Array.isArray(arg)) {
+              // Arg is an actual array object - use it directly
+              this.arrays[param.name] = arg;
+              console.log(`[PARAM] Array ${param.name} -> references passed array object`);
+            } else if (typeof arg === 'string') {
+              // Arg might be an array name or string literal
+              if (this.callStack.length > 0 && this.callStack[this.callStack.length - 1].localArrays && 
+                  this.callStack[this.callStack.length - 1].localArrays[arg]) {
+                // Reference to caller's array - get it from saved scope
+                this.arrays[param.name] = this.callStack[this.callStack.length - 1].localArrays[arg];
+                console.log(`[PARAM] Array ${param.name} -> references caller's array ${arg}`);
+              } else {
+                // String literal - create array from it
+                const charArray = new Array(arg.length + 1);
+                for (let j = 0; j < arg.length; j++) {
+                  charArray[j] = arg.charCodeAt(j);
+                }
+                charArray[arg.length] = 0; // Null terminate
+                this.arrays[param.name] = charArray;
+                console.log(`[PARAM] Array ${param.name} created from string "${arg}"`);
+              }
+            } else {
+              // Arg is a value - for char(0) parameters, this might be a pointer address
+              // For now, just store it as a single-element array
+              this.arrays[param.name] = [arg];
+              console.log(`[PARAM] Array ${param.name} = [${arg}]`);
+            }
+          } else {
+            // Simple variable parameter
+            this.variables[param.name] = arg;
+            console.log(`[PARAM] Variable ${param.name} = ${arg}`);
+          }
         }
       }
       
-      this.lineIndex = func.startLine + 1;
+      this.lineIndex = func.startLine;
     }
     
     // Execute until end of function or waiting for input
@@ -1662,7 +1429,26 @@ export class TinyCInterpreter {
       
       const line = this.lines[this.lineIndex];
       
-      const trimmed = line.trim();
+      let trimmed = line.trim();
+      
+      // For single-line functions, extract just the body between [ and ]
+      if (this.lineIndex === func.startLine && this.lineIndex === func.endLine) {
+        const bodyMatch = trimmed.match(/\[(.+)\]$/);
+        if (bodyMatch) {
+          trimmed = bodyMatch[1].trim();
+        }
+      }
+      
+      // For multi-line functions, extract code after [ on the first line
+      if (this.lineIndex === func.startLine && this.lineIndex < func.endLine) {
+        const originalTrimmed = trimmed;
+        const firstLineMatch = trimmed.match(/\[(.+)$/);
+        if (firstLineMatch) {
+          trimmed = firstLineMatch[1].trim();
+          console.log(`[MULTI-LINE-FUNC-START] ${funcName} original line: "${originalTrimmed}"`);
+          console.log(`[MULTI-LINE-FUNC-START] ${funcName} extracted first line code: "${trimmed}"`);
+        }
+      }
       
       // Skip comments, empty lines, and closing brackets
       if (trimmed === '' || trimmed.startsWith('/*') || trimmed.startsWith('//')) {
@@ -1678,6 +1464,10 @@ export class TinyCInterpreter {
       if (shouldWait) {
         // Waiting for input - will resume here WITHOUT incrementing lineIndex
         console.log('[executeUserFunction] Waiting for input at lineIndex', this.lineIndex, 'line:', trimmed);
+        // Restore lines if we switched to IPL
+        if (savedLines) {
+          this.lines = savedLines;
+        }
         return true;
       }
       
@@ -1691,12 +1481,23 @@ export class TinyCInterpreter {
     }
     
     // Finished function - restore previous context if any
+    if (savedLines) {
+      this.lines = savedLines;
+    }
+    
     if (this.callStack.length > 0) {
       const prevContext = this.callStack.pop();
       this.currentFunction = prevContext.functionName;
       this.lineIndex = prevContext.lineIndex;
       this.inFunction = true;
-      console.log(`[executeUserFunction] Restored context: ${prevContext.functionName} at line ${prevContext.lineIndex}`);
+      // Restore local variables and arrays from previous function
+      if (prevContext.localVariables) {
+        this.variables = prevContext.localVariables;
+        this.arrays = prevContext.localArrays;
+        console.log(`[executeUserFunction] Restored context: ${prevContext.functionName} at line ${prevContext.lineIndex} with local scope`);
+      } else {
+        console.log(`[executeUserFunction] Restored context: ${prevContext.functionName} at line ${prevContext.lineIndex}`);
+      }
       // DO NOT increment lineIndex here - the caller's loop will handle it
     } else {
       this.currentFunction = null;
@@ -1713,6 +1514,13 @@ export class TinyCInterpreter {
     this.errorCode = 3;
     this.errorFunction = funcName;
     this.errorLine = this.lineIndex;
+    
+    // Debug: log stack trace for debugging '0' function calls
+    if (funcName === '0' || funcName === 'MC') {
+      console.log(`[UNDEF-FUNC] Called with funcName="${funcName}" at lineIndex=${this.lineIndex}`);
+      console.log(`[UNDEF-FUNC] Current line: "${this.lines[this.lineIndex]}"`);
+      console.trace('Stack trace:');
+    }
     
     // Print error message like original TinyC
     const errorMsg = `Error 3\nUndefined function: ${funcName} at line ${this.lineIndex + 1}`;
@@ -1738,6 +1546,36 @@ export class TinyCInterpreter {
     }
     
     let processed = expr.trim().replace(/[;\]]$/, '');
+    
+    // Debug array expressions
+    if (processed.includes('z(') && depth === 0) {
+      console.log(`[EVAL-START] Expression: "${processed}", depth: ${depth}`);
+    }
+    
+    // Handle MC (Machine Call) expressions - e.g., "MC c,1" or "MC 65,1"
+    if (processed.startsWith('MC ')) {
+      const match = processed.match(/MC\s+([^,]+),(\d+)/);
+      if (match) {
+        const valueExpr = match[1].trim();
+        const mcNumber = parseInt(match[2]);
+        // Evaluate the value expression
+        const value = this.evaluateExpression(valueExpr, depth + 1);
+        console.log(`[MC-EXPR] Executing MC ${mcNumber} with value ${value}`);
+        // Push value and execute MC
+        this.push(value);
+        const isWaiting = this.executeMC(mcNumber);
+        if (isWaiting) {
+          // MC operation is waiting for input - return a sentinel value
+          // The calling code should check waitingForInput flag
+          console.log(`[MC-EXPR] MC ${mcNumber} is waiting for input`);
+          return 0;
+        }
+        // Return the value from the stack (MC operations typically push a result)
+        const result = this.pop();
+        console.log(`[MC-EXPR] MC returned ${result}`);
+        return result;
+      }
+    }
     
     // Handle gn (get number) - returns the input queue value or 0
     if (processed === 'gn') {
@@ -1809,9 +1647,19 @@ export class TinyCInterpreter {
       console.log(`[CHAR-REPLACE] Before: "${beforeCharReplace}" After: "${processed}"`);
     }
     
+    // Special case: if the expression is just a bare array name (for passing as reference/pointer),
+    // return the array OBJECT itself, not the name, so it can be passed across function scopes
+    // This is needed for functions like gs(arrayname) or ps(b) where we pass the array by reference
+    if (/^\w+$/.test(processed) && this.arrays[processed]) {
+      console.log(`[EVAL-ARRAY-REF] Returning array object for reference: "${processed}"`);
+      return this.arrays[processed]; // Return the actual array object
+    }
+    
     // Replace variables with their values
     for (const varName in this.variables) {
-      const regex = new RegExp('\\b' + varName + '\\b', 'g');
+      // Escape special regex characters in variable name
+      const escapedVarName = varName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      const regex = new RegExp('\\b' + escapedVarName + '\\b', 'g');
       let value = this.variables[varName];
       // Convert booleans to numbers (C-style: false=0, true=1)
       if (typeof value === 'boolean') {
@@ -1822,14 +1670,19 @@ export class TinyCInterpreter {
     
     // Replace array access with expressions
     for (const arrName in this.arrays) {
+      // Escape special regex characters in array name
+      const escapedArrName = arrName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
       // Match array access with any content inside parens
-      const regex = new RegExp(arrName + '\\s*\\(([^)]+)\\)', 'g');
+      const regex = new RegExp(escapedArrName + '\\s*\\(([^)]+)\\)', 'g');
       let match;
       while ((match = regex.exec(processed)) !== null) {
         const indexExpr = match[1];
         try {
           const index = this.evaluateExpression(indexExpr, depth + 1);
           const value = (this.arrays[arrName][parseInt(index)] || 0).toString();
+          if (arrName === 'z' && depth === 0) {
+            console.log(`[ARRAY-READ] Reading ${arrName}[${index}] = ${value}, actualValue=${this.arrays[arrName][parseInt(index)]}`);
+          }
           processed = processed.substring(0, match.index) + value + processed.substring(match.index + match[0].length);
           regex.lastIndex = 0; // Reset regex after modification
         } catch (e) {
@@ -1848,13 +1701,19 @@ export class TinyCInterpreter {
       const funcName = funcMatch[1];
       const argsStr = funcMatch[2];
       
+      // Skip if funcName is a number (like '0' from error recovery)
+      if (/^\d+$/.test(funcName)) {
+        continue;
+      }
+      
       // Skip if it's a known non-function pattern or already handled
       if (funcName === 'version' || funcName === 'gn') {
         continue;
       }
       
       // Skip if it's an array (should have been handled earlier)
-      if (this.arrays[funcName]) {
+      // Also skip if it's a variable that looks like it might be an array
+      if (this.arrays[funcName] || this.variables[funcName] !== undefined) {
         continue;
       }
       
@@ -2012,6 +1871,17 @@ export class TinyCInterpreter {
       }
     } catch (e) {
       console.error('Expression evaluation error:', e);
+    }
+    
+    // Check if it's a bare array name (for passing as pointer/reference)
+    if (this.arrays[processed]) {
+      console.log(`[EVAL-ARRAY-REF] Returning array name: "${processed}"`);
+      return processed; // Return the array name as a reference
+    }
+    
+    // Check if it's a variable name
+    if (this.variables[processed] !== undefined) {
+      return this.variables[processed];
     }
     
     return 0;
@@ -2563,11 +2433,22 @@ export class TinyCInterpreter {
     
     // Check if there's a bracket after the condition
     const afterCond = line.substring(condEndPos).trim();
-    const hasBracket = afterCond === '[';
+    const hasBracket = afterCond.startsWith('[');
+    
+    // Extract code that appears on the same line as the while statement after the [ or condition
+    let sameLineCode = '';
+    if (hasBracket && afterCond.length > 1) {
+      sameLineCode = afterCond.substring(1).trim(); // Everything after the '['
+      console.log('[executeWhile] Same-line code after [:', sameLineCode);
+    } else if (!hasBracket && afterCond.length > 0) {
+      // No bracket - the rest of the line is the loop body (e.g., while(cond)statement)
+      sameLineCode = afterCond;
+      console.log('[executeWhile] Single-line while body:', sameLineCode);
+    }
     
     // loopStart should be the first line INSIDE the loop, not the while statement itself
     let loopStart = this.lineIndex + 1;
-    let loopEnd = hasBracket ? this.findClosingBracket(this.lineIndex) : this.lineIndex + 1;
+    let loopEnd = hasBracket ? this.findClosingBracket(this.lineIndex) : this.lineIndex;
     console.log('[executeWhile] loopStart:', loopStart, 'loopEnd:', loopEnd, 'condition:', condition);
     
     const savedInLoop = this.inLoop;
@@ -2652,6 +2533,33 @@ export class TinyCInterpreter {
       
       this.shouldBreak = false;
       this.shouldContinue = false;
+      
+      // If there's code on the same line as the while statement after [, execute it first
+      if (sameLineCode) {
+        console.log('[executeWhile] Executing same-line code:', sameLineCode);
+        const shouldWait = this.executeLine(sameLineCode);
+        if (shouldWait) {
+          this.loopState = {
+            type: 'while',
+            condition: condition,
+            loopStart: loopStart,
+            loopEnd: loopEnd,
+            iterations: iterations,
+            savedInLoop: savedInLoop,
+            sameLineCode: sameLineCode
+          };
+          this.inLoop = savedInLoop;
+          return true;
+        }
+        if (this.shouldReturn) {
+          this.lineIndex = loopEnd;
+          this.inLoop = savedInLoop;
+          return false;
+        }
+        if (this.shouldBreak) {
+          break;
+        }
+      }
       
       // Execute loop body
       this.lineIndex = loopStart;

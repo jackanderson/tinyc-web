@@ -1,0 +1,253 @@
+/* tinycx.ipl - lrb
+[main();]
+putchar char c[if(!c)c='"';return MC c,1]
+getchar[return MC 2]
+chrdy[return MC 12]
+pft char f(0),t(0)[MC f,t,13]
+gs char b(0)[return MC b,15]
+ps char b(0);[int l;char c;l=-1;while(c=b(++l))MC c,1;return l]
+pl char b(0)[MC 13,1;MC 10,1;ps b]
+alphanum char a[if((a>='a')*(a<='z')+(a>='A')*(a<='Z')+(a>='0')*(a<='9')+(a=='_'))return 1]
+num char b(0);int v(0)[int k;v(0)=0
+while(k<5)[if((b(k)<'0')+(b(k)>'9'))return k
+v(0)=10*v(0)+b(k)-'0';++k]
+return k]
+atoi char b(0);int v(0)[int k,s;char c;s=1;c=b(0)
+while((c==' ')+(c=='-')+(c=='+'))[
+if(c=='-')s=-1;c=b(++k)]
+k=k+num(b+k,v);v(0)=s*v(0);return k]
+pn int n[MC ' ',1;MC n,14]
+gn[char b(20);int v(0)
+while(1)[gs b;if(atoi b,v)return v(0)
+ps"number required "]]
+ceqn char a(0),b(0);int n[int k;k=-1
+while((++k)<n)if(a(k)!=b(k))return 0
+return 1]
+index char i(0);int l;char f(0);int n[
+if(n<=0)return 1
+if(l<=0)return 0
+int a,d(0);while(a+n<=l)[d(0)=1;a=a+1+scann(i+a,i+l-n,f(0),d)
+if(d(0))return 0
+if(ceqn(i+a,f+1,n-1))return a]]
+move char a(0),b(0)[int k,l(0);l(0)=1;k=scann(a,a+32765,0,l)
+movebl(a,a+k,b-a);return k
+]
+gc[char f;f=MC 2;while(MC(2)!=10)[]
+return f
+]
+movebl char a(0),b(0);int n[MC(a,b,n,7)]
+countch char a(0),b(0),c[return MC(a,b,c,8)]
+scann char a(0),b(0),c;int n(0)[return MC(a,b,c,n,9)]
+readfile char n(0),w(0),l(0);int u[int k,t
+if(MC(1,n,0,u,3)<0)[pl"File not found";MC(u,6)return -1]
+while(w<=l+1)[k=MC(w,u,4)
+if(k==-1)[MC(u,6);return t]
+if(k<-1)[MC(u,6);return k]
+w=w+k;t=t+k
+]
+pl"Too big";pl"";MC(u,6);return -2
+]
+writefile char n(0),b(0),e(0);int u[int k,t,l
+if(MC(2,n,e-b+1,u,3)<0)[pl"Unit 1 open";MC(u,6);return -1]
+while(b<=e)[l=e-b;if(l>511)l=511
+k=MC(b,b+l,u,5);if(k<0)[MC(u,6);return k]
+t=t+l+1;b=b+l+1
+]
+k=MC(u,6);return t
+]
+fopen int rw;char n(0);int s,u[return MC(rw,n,s,u,3)]
+fread char a(0);int u[return MC(a,u,4)]
+fwrite char f(0),t(0);int u[return MC(f,t,u,5)]
+fclose int u[MC(u,6)]
+beep int f,d[MC f,d,17]
+cnormal[on]
+chide[off]
+csolid[solid]
+cls[MC '\'-'A',1;MC '\'-1,1;MC '2',1;MC 'J',1;posc 1,1]
+color char c[MC '\'-'A',1;MC '\'-1,1;MC '3',1;MC c,1;MC 'm',1]
+posc int r,c[int R,C;R=25;C=80
+if((r>=1)*(r<=R)*(c>=1)*(c<=C)==0)return 1
+MC '\'-'A',1;MC '\'-1,1;pos r;MC ';',1;pos c;MC 'H',1;return 0
+]
+pos int rc[if(rc>9)[MC rc/10+48,1;rc=rc%10]
+MC rc+48,1
+]
+hilo char c[MC '\'-'A',1;MC '\'-1,1;MC c,1;MC 'm',1]
+oo char hs[MC '\'-'A',1;MC '\'-1,1;MC '?',1;MC '2',1;MC '5',1
+MC hs,1
+]
+on[oo 'h']
+off[oo 'l']
+solid[]
+version[return MC 1005]
+int last,seed
+random int low,high[int range;if(!last)last=seed=99
+range=high-low+1;last=last*seed;if(last<0)last=-last
+return low+(last/7)%range
+]
+strlen char st(0)[int i;while(st(i))++i;return i]
+strcat char s(0),t(0)[int i,j;i=strlen(s)
+while(t(j))[s(i)=t(j);++i;++j];s(i)=0]
+strcpy char s(0),t(0)[int i;while(s(i)=t(i))++i]
+sak[pl"Press Enter ... ";return getchar]
+exit[MC 10]
+tolower char s(0)[int i;for(i=0;i<strlen(s);++i)
+if((s(i)>='A')*(s(i)<='Z'))s(i)=s(i)+' '
+]
+toupper char s(0)[int i;for(i=0;i<strlen(s);++i)
+if((s(i)>='a')*(s(i)<='z'))s(i)=s(i)-' '
+]
+memset char s(0);int b;char c[MC s,b,c,16]
+endlibrary
+int er(0),cu,lo,pe,lp
+int ll,la
+char ft(40),tt(80)
+int fl,tl
+char ln(133)
+char pr(90000)
+main[
+pr(0)=10;lp=90000;int v(1);char c;pl"tiny-c shell - 6/24/17"
+pl"";pl""
+while(1)[ps"tc>"
+while((ll=gs(ln))==0)[strcpy(ln,"+");break]
+c=ln(0)
+if(c=='.')[
+if(num(ln+1,v))go(v)
+else if((ln(2)==0)+(alphanum(ln(2))==0))[
+c=ln(1)
+if(c=='p')pt
+else if(c=='d')dl
+else if(c=='l')oi
+else if(c=='c')ch
+else if(c=='/')fa
+else if(c=='r')gi
+else if(c=='w')gu
+else if(c=='x')return
+else [ps"???";pl""]
+]else st
+]
+else if(c=='-')up
+else if(c=='+')dn
+else in
+]
+]
+pi int n[int f,l,v(0);v(0)=n;f=fc;lo=lo+v(0)-1
+l=cu+scann(pr+cu,pr+pe,10,v);cu=l;lo=lo-v(0)
+MC pr+f,pr+l,13
+]
+fc[int k
+if((k=cu)==0)return 0
+while(pr(--k)!=10)if(k<=0)break
+return k+1
+]
+lc[int k;k=cu-1
+while(pr(++k)!=10)if(k>=pe)break
+return k
+]
+nl[if((cu=lc()+1)>pe)[
+cu=pe;return 0
+]
+return ++lo
+]
+bl[if((cu=fc()-1)<0)cu=0
+else --lo
+]
+pt[int v(0);if(ln(2))num(ln+3,v)
+else v(0)=1
+pi(v(0))
+]
+dl[int f,l,v(1);if(cu==0)[
+ps"cannot delete line 0";pl"";return
+]
+if(!ln(2))v(0)=1
+else num(ln+3,v)
+la=la-v(0);f=fc;l=cu+scann(pr+cu,pr+pe,10,v)
+la=la+v(0);--lo;cu=f-1
+if(l<pe)movebl(pr+l+1,pr+pe,-(l-f+1))
+pe=pe-(l-f+1)
+]
+oi[int k;if(!ln(3))return
+if(ln(2))[fl=move(ln+3,ft)
+if(ft(0)=='^')ft(0)=10
+if(ft(fl-1)=='^')ft(fl-1)=10
+]
+if(!fl)[pl"locate what?";pl"";return
+]
+if(nl())[
+if(k=index(pr+cu-1,pe-cu+2,ft,fl))[
+cu=cu-2+k
+if(pr(cu)==10)++cu
+lo=countch(pr,pr+cu-1,10);pi 1
+]
+else[ps"?";pl""]
+]
+else[ps"at bottom";pl""]
+]
+ch[char d;int p,f,l;if(ln(2))[
+d=ln(2);p=2;while((ln(++p)!=d)[
+if(!ln(p))[ln(p+1)=0;break
+]
+]
+ln(p)=0;fl=move(ln+3,ft);tl=move(ln+p+1,tt)
+if(tl)if(tt(tl-1)==d)--tl
+]
+f=fc;l=lc()-1;int k
+if(k=index(pr+f,l-f+1,ft,fl))[
+cu=f+k-1;movebl(pr+cu+fl,pr+pe,tl-fl)
+pe=pe+tl-fl;if(tl)movebl(tt,tt+tl-1,pr+cu-tt)
+]
+pi 1
+]
+in[++ll;if(pe+ll>lp)[
+ps"won't fit";pl"";return
+]
+if(nl)movebl(pr+cu,pr+pe,ll)
+else[++cu;++lo]
+pe=pe+ll;movebl(ln,ln+ll-1,pr-ln+cu);pr(cu+ll-1)=10;++la
+]
+wh[int f,l,u,b;pn lo;ps" --- err ";pn er(0);pl""
+u=cu;f=fc;b=u-f;l=lc;--f
+while((++f)<l)putchar(pr(f));pl""
+while((--b)>=0)putchar(' ')
+putchar'<';pl""
+]
+dn[int v(1);if(!ln(1))v(0)=1
+else num(ln+1,v)
+lo=lo+v(0);v(0)=v(0)+1;cu=cu+scann(pr+cu,pr+pe,10,v)
+lo=lo-v(0);pi(1)
+]
+up[int v(1);if(!ln(1))v(0)=1
+else num(ln+1,v)
+if((v(0)=lo-v(0))<0)v(0)=0
+go(v)
+]
+go int l(1)[lo=l(0);l(0)=l(0)+1;cu=scann(pr,pr+pe,10,l)
+lo=lo-l(0);pi(1)
+]
+fa[pn lo;pn la;pn pe;pn lp-pe;pl""
+]
+st[MC(ln+ll,134-ll,' ',16);MC(er,ln+1,pr+pe,pr,11)
+if(cu<0)cu=0;if(cu>pe)cu=pe
+lo=countch(pr,pr+cu-1,10);pl""
+if(er(0))
+if(er(0)==99)[ps"stopped";pl""]
+else wh
+]
+gi[int k;k=1;while((++k)<7)[
+if(!ln(k))[while((++k)<7)ln(k)=' '
+]
+]
+pn k=readfile(ln+3,pr+pe+1,pr+lp,1)
+pl"";if(k<0)return
+int i;char crs(1);crs(0)=13
+while(i=index(pr+pe+1,k,crs,1))[
+movebl(pr+pe+1+i,pr+pe+1+i+k,-1);--k
+]
+pe=pe+k;la=countch(pr+1,pr+pe,10);fa
+]
+gu[int k;fa;k=1;while((++k)<7)[
+if(!ln(k))[while((++k)<7)ln(k)=' '
+]
+]
+pn writefile(ln+3,pr+1,pr+pe,1);pl""
+]

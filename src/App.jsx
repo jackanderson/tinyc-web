@@ -1,4 +1,4 @@
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import CodeEditor from './components/CodeEditor';
 import OutputPanel from './components/OutputPanel';
 import { TinyCInterpreter } from './interpreter/TinyCInterpreter';
@@ -17,6 +17,19 @@ function App() {
   const [interpreter] = useState(() => new TinyCInterpreter());
   const inputRef = useRef(null);
   const spinnerTimer = useRef(null);
+
+  // Load IPL library on mount
+  useEffect(() => {
+    fetch('/tinycx.ipl')
+      .then(response => response.text())
+      .then(iplCode => {
+        interpreter.loadIPL(iplCode);
+        console.log('IPL library loaded successfully');
+      })
+      .catch(error => {
+        console.warn('Could not load IPL library:', error);
+      });
+  }, [interpreter]);
 
   const handleRun = () => {
     try {
