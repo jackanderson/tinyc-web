@@ -1,0 +1,45 @@
+/* Test IPL-style functions like in tinycx.ipl */
+
+/* Replicate some IPL functions locally */
+putchar char c[if(!c)c='"';return MC c,1]
+getchar[return MC 2]
+
+/* Simple test program using IPL-style functions */
+main [
+  pl "=== IPL Compatibility Test ==="
+  pl ""
+  
+  /* Test putchar */
+  ps "Testing putchar: "
+  putchar('H')
+  putchar('i')
+  putchar('!')
+  MC 13,1;MC 10,1
+  
+  /* Test ps, pl, pn from interpreter */
+  ps "Testing ps/pl/pn: "
+  pl "Hello World!"
+  pn 123
+  MC 13,1;MC 10,1
+  
+  /* Test arrays and strlen */
+  char msg(30)
+  msg(0) = 'T'
+  msg(1) = 'e'
+  msg(2) = 's'
+  msg(3) = 't'
+  msg(4) = 0
+  
+  ps "String operations: strlen(msg) = "
+  pn strlen(msg)
+  MC 13,1;MC 10,1
+  
+  /* Test string copy */
+  char dest(30)
+  strcpy(dest, msg)
+  ps "After strcpy: "
+  pl dest
+  
+  pl ""
+  pl "=== IPL compatibility verified! ==="
+]

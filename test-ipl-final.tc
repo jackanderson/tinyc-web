@@ -1,0 +1,49 @@
+/* Comprehensive IPL Function Test */
+
+main [
+  pl "=== TinyC IPL Function Test ==="
+  pl ""
+  
+  /* Test basic output */
+  ps "Testing ps: "
+  ps "Hello"
+  MC 13,1;MC 10,1
+  pl "Testing pl: World"
+  pn 42
+  MC 13,1;MC 10,1
+  pl ""
+  
+  /* Test string operations */
+  char buf(20)
+  char src(20)
+  
+  src(0) = 'H'
+  src(1) = 'i'
+  src(2) = 0
+  
+  strcpy(buf, src)
+  ps "After strcpy: "
+  pl buf
+  
+  ps "strlen(buf) = "
+  pn strlen(buf)
+  MC 13,1;MC 10,1
+  
+  pl ""
+  
+  /* Test math */
+  int x, y, z
+  x = 10
+  y = 20
+  z = x + y
+  ps "Math: "
+  pn x
+  ps " + "
+  pn y
+  ps " = "
+  pn z
+  MC 13,1;MC 10,1
+  
+  pl ""
+  pl "=== All IPL tests passed! ==="
+]

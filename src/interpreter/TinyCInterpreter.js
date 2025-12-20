@@ -96,18 +96,18 @@ export class TinyCInterpreter {
   }
   
   // Execute Machine Call (MC) - low-level system functions
-  executeMC(argCount) {
+  executeMC(mcNumber) {
     // MC constants from original tiny-c mc.c:
     // 1=PUTC, 2=GETC, 3=OPEN, 4=READ, 5=WRITE, 6=CLOSE, 7=MOVEBL, 
     // 8=COUNTCH, 9=SCANN, 10=HALT, 11=APPL, 12=CHRDY, 13=PUTBL, 
     // 14=PUTN, 15=GETLN, 16=SETMEM, 17=BEEP
     
-    // First pop the MC operation number from stack (like original mc.c)
-    const mcNumber = this.pop();
+    // The mcNumber parameter IS the MC operation number (passed from executeLine)
+    // Data should already be on the stack before calling this function
     
     // User-defined machine calls (>= 1000)
     if (mcNumber >= 1000) {
-      console.log(`MC user-defined call ${mcNumber - 1000} with ${argCount} args`);
+      console.log(`MC user-defined call ${mcNumber - 1000}`);
       return;
     }
     
@@ -272,12 +272,7 @@ export class TinyCInterpreter {
       }
         
       default: {
-        // Pop any arguments that were supposed to be on the stack
-        // Note: argCount includes the MC number itself, so we already popped 1
-        for (let i = 1; i < argCount; i++) {
-          this.pop();
-        }
-        console.log(`MC ${mcNumber} with ${argCount} args - not implemented (args discarded)`);
+        console.log(`MC ${mcNumber} - not implemented`);
         // Push a default return value
         this.push(0);
       }
@@ -357,7 +352,7 @@ export class TinyCInterpreter {
           inFunction = true;
           bracketDepth = 1;
           this.functions[funcName] = { startLine: i, endLine: -1 };
-          continue;
+          // Don't continue - we need to count brackets on this line too!
         }
         
         // Track bracket depth in functions
@@ -534,6 +529,12 @@ export class TinyCInterpreter {
       console.log('Executed', this.totalExecutedLines, 'lines in', elapsed, 'ms', '- Line', this.lineIndex, ':', this.lines[this.lineIndex]?.substring(0, 50));
     }
     
+    // Handle local variable declarations (int x, char buf(20))
+    if (line.startsWith('int ') || line.startsWith('char ')) {
+      this.parseGlobalVarDeclaration(line);
+      return false;
+    }
+    
     // Handle multiple statements on one line separated by semicolons
     // BUT: Don't split for/while/if statements which have semicolons in their syntax
     if (line.includes(';') && !line.includes('"') && !line.match(/^(for|while|if)\s*\(/)) {
@@ -633,6 +634,19 @@ export class TinyCInterpreter {
         this.println(match[1]);
       } else if (line === 'pl ""') {
         this.println();
+      } else {
+        // Handle array parameter like: pl buf
+        const arrayMatch = line.match(/pl\s+(\w+)/);
+        if (arrayMatch) {
+          const arrayName = arrayMatch[1];
+          if (this.arrays[arrayName]) {
+            let str = '';
+            for (let i = 0; i < this.arrays[arrayName].length && this.arrays[arrayName][i] !== 0; i++) {
+              str += String.fromCharCode(this.arrays[arrayName][i]);
+            }
+            this.println(str);
+          }
+        }
       }
       return false;
     }
@@ -656,6 +670,19 @@ export class TinyCInterpreter {
       const match = line.match(/ps\s+"([^"]*)"/);
       if (match) {
         this.print(match[1]);
+      } else {
+        // Handle array parameter like: ps buf
+        const arrayMatch = line.match(/ps\s+(\w+)/);
+        if (arrayMatch) {
+          const arrayName = arrayMatch[1];
+          if (this.arrays[arrayName]) {
+            let str = '';
+            for (let i = 0; i < this.arrays[arrayName].length && this.arrays[arrayName][i] !== 0; i++) {
+              str += String.fromCharCode(this.arrays[arrayName][i]);
+            }
+            this.print(str);
+          }
+        }
       }
       return false;
     }

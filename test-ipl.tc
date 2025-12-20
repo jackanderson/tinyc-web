@@ -1,0 +1,43 @@
+/* Test IPL functions */
+
+/* Test basic output functions */
+testOutput [
+  ps "Testing ps: Hello"
+  MC 13,1;MC 10,1
+  pl "Testing pl: World"
+  pn 42
+  MC 13,1;MC 10,1
+]
+
+/* Test string functions */
+testString [
+  char buf(20)
+  ps "Testing strcpy and strlen"
+  MC 13,1;MC 10,1
+  strcpy(buf, "Hello")
+  ps "Length: "
+  pn strlen(buf)
+  MC 13,1;MC 10,1
+]
+
+/* Test math */
+testMath [
+  int x, y
+  x = 10
+  y = 20
+  ps "x + y = "
+  pn x + y
+  MC 13,1;MC 10,1
+]
+
+main [
+  pl "=== Testing IPL Functions ==="
+  pl ""
+  testOutput()
+  pl ""
+  testString()
+  pl ""
+  testMath()
+  pl ""
+  pl "=== All tests complete ==="
+]

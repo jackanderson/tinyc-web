@@ -1,0 +1,31 @@
+/* Test strcpy with string literals */
+
+main [
+  char buf(20)
+  char src(20)
+  
+  pl "=== Test 1: Array to array ==="
+  src(0) = 'H'
+  src(1) = 'i'
+  src(2) = 0
+  strcpy(buf, src)
+  ps "buf: "
+  ps buf
+  MC 13,1;MC 10,1
+  
+  pl ""
+  pl "=== Test 2: Direct character copy ==="
+  buf(0) = 'T'
+  buf(1) = 'e'
+  buf(2) = 's'
+  buf(3) = 't'
+  buf(4) = 0
+  ps "buf: "
+  ps buf
+  MC 13,1;MC 10,1
+  
+  pl ""
+  ps "Length: "
+  pn strlen(buf)
+  MC 13,1;MC 10,1
+]

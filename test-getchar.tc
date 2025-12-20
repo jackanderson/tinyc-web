@@ -1,0 +1,5 @@
+/* Test */
+getchar[return MC 2]
+main [
+  pl "Hello"
+]

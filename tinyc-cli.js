@@ -131,16 +131,88 @@ class TinyCCLI {
       exit(1);
     }
   }
+
+  // Interactive shell mode
+  startShell() {
+    // Print header like C version
+    stdout.write('\ntiny-c/PC Interpreter  Version 2.7.11\n');
+    stdout.write('JavaScript Edition - 2025\n\n');
+    stdout.write('tiny-c shell - interactive mode\n\n');
+
+    // Setup output handlers
+    this.setupOutputHandlers();
+
+    // Create readline interface for shell
+    const rl = readline.createInterface({
+      input: stdin,
+      output: stdout,
+      prompt: 'tc>'
+    });
+
+    let codeBuffer = [];
+    let bracketDepth = 0;
+    let hasExecutedAnything = false;
+
+    rl.prompt();
+
+    rl.on('line', (line) => {
+      const trimmed = line.trim();
+      
+      // Check for exit command
+      if (trimmed === 'exit' || trimmed === 'quit') {
+        rl.close();
+        exit(0);
+      }
+
+      // Count brackets to detect multi-line inputs
+      for (let char of trimmed) {
+        if (char === '[') bracketDepth++;
+        if (char === ']') bracketDepth--;
+      }
+
+      codeBuffer.push(line);
+
+      // If brackets are balanced, execute the code
+      if (bracketDepth === 0 && codeBuffer.length > 0) {
+        const code = codeBuffer.join('\n');
+        codeBuffer = [];
+        const codeTrimmed = code.trim();
+
+        try {
+          // Check if it's a function definition
+          const isFunctionDef = codeTrimmed.match(/^(\w+)\s+.*\[/);
+          
+          if (isFunctionDef) {
+            // It's a function definition - add it to the interpreter's code
+            this.interpreter.code += code + '\n';
+            this.interpreter.lines = this.interpreter.code.split('\n').map(l => this.interpreter.stripComment(l));
+            this.interpreter.collectDefinitions();
+          } else if (codeTrimmed.startsWith('int ') || codeTrimmed.startsWith('char ')) {
+            // Variable declaration - parse it
+            this.interpreter.parseGlobalVarDeclaration(codeTrimmed);
+          } else {
+            // Regular statement or function call - execute it
+            this.interpreter.executeLine(codeTrimmed);
+          }
+        } catch (error) {
+          // Errors are suppressed unless debug mode
+        }
+      }
+
+      rl.prompt();
+    });
+
+    rl.on('close', () => {
+      exit(0);
+    });
+  }
 }
 
 // Main execution
 if (!filename) {
-  // Temporarily restore console.error for usage message
-  const originalError = console.error;
-  console.error = (...args) => process.stderr.write(args.join(' ') + '\n');
-  console.error('Usage: node tinyc-cli.js [--debug] <program.tc>');
-  exit(1);
+  const cli = new TinyCCLI();
+  cli.startShell();
+} else {
+  const cli = new TinyCCLI();
+  cli.runFile(filename);
 }
-
-const cli = new TinyCCLI();
-cli.runFile(filename);
