@@ -150,11 +150,19 @@ function App() {
   };
 
   const handleSaveFile = () => {
+    const defaultFilename = 'program.tc';
+    const filename = prompt('Enter filename:', defaultFilename);
+    
+    if (!filename) return; // User cancelled
+    
+    // Ensure .tc extension
+    const finalFilename = filename.endsWith('.tc') ? filename : filename + '.tc';
+    
     const blob = new Blob([code], { type: 'text/plain' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = 'program.tc';
+    a.download = finalFilename;
     document.body.appendChild(a);
     a.click();
     document.body.removeChild(a);
@@ -165,10 +173,11 @@ function App() {
     <div className="app">
       <header className="app-header">
         <div className="header-left">
-          <h1>tinyc-web</h1>
+          <img src="/tinyc-logo.png" alt="TinyC Logo" className="logo" />
+          <h1>Tiny-C/Web Interpreter</h1>
         </div>
         <div className="header-right">
-          tiny-c interpreter
+      
         </div>
       </header>
       
@@ -490,8 +499,8 @@ function App() {
 
       <footer className="app-footer">
         <p>
-          Original tiny-c Copyright © 1984 by Scott B. Guthery | 
-          Web port © 2025 | 
+          Original Tiny-C Copyright © 1984 by Scott B. Guthery | 
+          Web port © 2025 Jack Anderson | 
           <a href="https://github.com" target="_blank" rel="noopener noreferrer"> View on GitHub</a>
         </p>
       </footer>

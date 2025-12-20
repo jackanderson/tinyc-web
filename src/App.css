@@ -40,6 +40,11 @@ body {
   gap: 12px;
 }
 
+.header-left .logo {
+  height: 48px;
+  width: auto;
+}
+
 .header-right {
   font-size: 0.85rem;
   color: #8b949e;
