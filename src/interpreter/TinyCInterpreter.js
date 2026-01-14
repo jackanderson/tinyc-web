@@ -14,7 +14,12 @@ export class TinyCInterpreter {
     this.waitingForInput = false;
     this.inputPrompt = '';
     this.variables = {};
-    this.functions = {};
+    // Don't reset functions - preserve IPL functions
+    if (!this.functions) this.functions = {};
+    // Clear only non-IPL functions
+    if (this.iplFunctions) {
+      this.functions = { ...this.iplFunctions };
+    }
     this.arrays = {};
     this.seed = 99;
     this.last = 0;
@@ -29,6 +34,7 @@ export class TinyCInterpreter {
     this.shouldReturn = false;
     this.shouldBreak = false;
     this.shouldContinue = false;
+    this.pendingReturn = false;  // True when a return statement is waiting for input
     this.inLoop = false;
     this.loopState = null;  // Save loop state when waiting for input
     this.ifChainExecuted = false;  // Track if an if/else-if chain branch was executed
@@ -44,7 +50,8 @@ export class TinyCInterpreter {
     if (!this.iplLibrary) this.iplLibrary = '';  // Initialize only if undefined
     if (!this.iplLines) this.iplLines = [];  // Preserve IPL code lines
     if (!this.iplFunctions) this.iplFunctions = {};  // Preserve IPL function definitions
-    this.iplLoaded = false;  // Track if IPL has been loaded
+    // Don't reset iplLoaded - keep it true if IPL was loaded
+    if (this.iplLoaded === undefined) this.iplLoaded = false;
   }
   
   // Output functions
@@ -327,7 +334,10 @@ export class TinyCInterpreter {
 
   // Load IPL library (standard library functions)
   loadIPL(iplCode) {
-    if (this.iplLoaded) return; // Already loaded
+    if (this.iplLoaded) {
+      console.log('IPL already loaded, skipping');
+      return; // Already loaded
+    }
     
     console.log('Loading IPL library...');
     this.iplLibrary = iplCode;
@@ -378,10 +388,12 @@ export class TinyCInterpreter {
   
   // Execute a tiny-c program
   execute(code) {
+    console.log('[EXECUTE] Starting execution, code length:', code.length);
     this.reset();
     
     // If IPL library was set but not loaded into this reset instance, load it
     if (this.iplLibrary && !this.iplLoaded) {
+      console.log('[EXECUTE] Loading IPL library');
       this.loadIPL(this.iplLibrary);
     }
     
@@ -514,6 +526,14 @@ export class TinyCInterpreter {
       return this.getOutput();
     }
     
+    // Make sure we're using the right lines array for the current function
+    if (this.currentFunction && this.iplFunctions && this.iplFunctions[this.currentFunction]) {
+      if (this.lines !== this.iplLines) {
+        console.log('[continueExecution] Switching to IPL lines for function', this.currentFunction);
+        this.lines = this.iplLines;
+      }
+    }
+    
     // Reset execution timer when continuing after input
     this.executionStartTime = Date.now();
     
@@ -567,7 +587,23 @@ export class TinyCInterpreter {
         }
         
         // Check if this line is inside a function definition
-        const inFuncDef = Object.values(this.functions).some(
+        // When in user code, only check user functions (not IPL functions)
+        // When in IPL code, only check IPL functions
+        let functionsToCheck;
+        if (this.lines === this.iplLines) {
+          // In IPL code - check IPL functions
+          functionsToCheck = this.iplFunctions || {};
+        } else {
+          // In user code - check only user-defined functions (exclude IPL)
+          functionsToCheck = {};
+          for (const [name, func] of Object.entries(this.functions || {})) {
+            // Exclude IPL functions by checking if they exist in iplFunctions
+            if (!this.iplFunctions || !this.iplFunctions[name]) {
+              functionsToCheck[name] = func;
+            }
+          }
+        }
+        const inFuncDef = Object.values(functionsToCheck).some(
           func => i > func.startLine && i <= func.endLine
         );
         if (inFuncDef && !this.inFunction) {
@@ -606,6 +642,7 @@ export class TinyCInterpreter {
     // Check execution time every 1000 lines to avoid overhead
     if (this.totalExecutedLines % 1000 === 0) {
       const elapsed = Date.now() - this.executionStartTime;
+      console.log(`[PROGRESS] Line ${this.lineIndex}: "${this.lines[this.lineIndex]?.substring(0, 60)}..."`);
       if (elapsed > 30000) {  // 30 second timeout - more generous for complex programs
         console.error('TIMEOUT: Execution exceeded 30 seconds');
         console.error('Executed', this.totalExecutedLines, 'lines in', elapsed, 'ms');
@@ -676,6 +713,25 @@ export class TinyCInterpreter {
     if (line.startsWith('return ')) {
       const expr = line.substring(7);
       console.log(`[RETURN] Evaluating expression: "${expr}"`);
+      
+      // Special handling for MC calls in return statements
+      // MC calls may need to wait for input
+      if (expr.trim().startsWith('MC ')) {
+        const shouldWait = this.executeLine(expr.trim());
+        if (shouldWait) {
+          // MC is waiting for input - don't set shouldReturn yet
+          // Store that we need to return after input is received
+          console.log(`[RETURN] MC call waiting for input`);
+          this.pendingReturn = true;
+          return true;
+        }
+        // MC completed - use the return value from the stack
+        this.returnValue = this.pop();
+        console.log(`[RETURN] MC returned: ${this.returnValue}`);
+        this.shouldReturn = true;
+        return false;
+      }
+      
       this.returnValue = this.evaluateExpression(expr);
       console.log(`[RETURN] Result: ${this.returnValue}`);
       this.shouldReturn = true;
@@ -796,9 +852,21 @@ export class TinyCInterpreter {
         console.log('[MC-LINE] Matched MC pattern:', match[0], 'value:', match[1], 'op:', match[2]);
         const valueExpr = match[1].trim();
         const argCount = parseInt(match[2]);
-        // Evaluate the first parameter (could be variable or expression)
-        const value = this.evaluateExpression(valueExpr);
-        console.log('[MC-LINE] Evaluated value:', value, 'calling executeMC with op:', argCount);
+        
+        // For MC operations that need array references (like GETLN), 
+        // pass the array name instead of evaluating it
+        let value;
+        if (argCount === 15 && this.arrays[valueExpr]) {
+          // GETLN with array parameter - push the array name
+          value = valueExpr;
+          console.log('[MC-LINE] GETLN: Pushing array name:', valueExpr);
+        } else {
+          // Evaluate the first parameter (could be variable or expression)
+          value = this.evaluateExpression(valueExpr);
+          console.log('[MC-LINE] Evaluated value:', value);
+        }
+        
+        console.log('[MC-LINE] Calling executeMC with op:', argCount, 'value:', value);
         // In tiny-c: MC pushes a value, then the argCount determines what MC operation to perform
         // argCount is actually the MC operation code!
         // The value is pushed as data
@@ -811,48 +879,23 @@ export class TinyCInterpreter {
     }
     
     if (line.startsWith('ps ')) {
-      const match = line.match(/ps\s+"([^"]*)"/);
-      if (match) {
-        this.print(match[1]);
-      } else {
-        // Handle array parameter like: ps buf
-        const arrayMatch = line.match(/ps\s+(\w+)/);
-        if (arrayMatch) {
-          const arrayName = arrayMatch[1];
-          if (this.arrays[arrayName]) {
-            let str = '';
-            for (let i = 0; i < this.arrays[arrayName].length && this.arrays[arrayName][i] !== 0; i++) {
-              str += String.fromCharCode(this.arrays[arrayName][i]);
-            }
-            this.print(str);
-          }
-        }
-      }
-      return false;
+      // Parse as function call: ps "string" or ps buf
+      return this.executeFunction(`ps(${line.substring(3)})`);
     }
     
     if (line.startsWith('pn ')) {
-      const match = line.match(/pn\s+(.+)/);
-      if (match) {
-        const expr = match[1];
-        console.log(`[PN-EVAL] Evaluating: "${expr}"`);
-        const value = this.evaluateExpression(expr);
-        console.log(`[PN-EVAL] Result: ${value}`);
-        this.print(' ' + value);
-      }
-      return false;
+      // Parse as function call: pn expr
+      return this.executeFunction(`pn(${line.substring(3)})`);
     }
     
     if (line.startsWith('pr ')) {
-      const match = line.match(/pr\s+"([^"]*)"/);
-      if (match) {
-        this.println(match[1]);
-      } else if (line === 'pr ""') {
-        this.println();
-      } else {
-        console.warn('pr statement did not match pattern:', line);
-      }
-      return false;
+      // Parse as function call: pr "string"
+      return this.executeFunction(`pr(${line.substring(3)})`);
+    }
+    
+    if (line.startsWith('pl ')) {
+      // Parse as function call: pl "string"
+      return this.executeFunction(`pl(${line.substring(3)})`);
     }
     
     // Variable or array assignment (allow leading whitespace)
@@ -1033,98 +1076,11 @@ export class TinyCInterpreter {
     if (this.functions[funcName]) {
       // Parse and evaluate arguments
       const args = argsStr ? argsStr.split(',').map(a => this.evaluateExpression(a.trim())) : [];
+      console.log(`[CALL] ${funcName}(${argsStr}) -> args:`, args);
       return this.executeUserFunction(funcName, args);
     }
     
-    // Built-in functions (only if not user-defined)
-    if (funcName === 'version') {
-      return false; // Returns 7
-    }
-    
-    if (funcName === 'random' && !this.functions['random']) {
-      // Called but not assigned - just execute built-in only if no user-defined version
-      const args = argsStr.split(',').map(a => this.evaluateExpression(a.trim()));
-      this.randomFunc(args[0] || 100);
-      return false;
-    }
-    
-    // ps() with expression parameter (e.g., ps(buf + p))
-    if (funcName === 'ps') {
-      const stringMatch = argsStr.match(/"([^"]*)"/);
-      if (stringMatch) {
-        this.print(stringMatch[1]);
-      } else {
-        // Handle expression like ps(buf + p)
-        // For now, just print placeholder
-        this.print('[string]');
-      }
-      return false;
-    }
-    
-    // pr() with parameter
-    if (funcName === 'pr') {
-      const stringMatch = argsStr.match(/"([^"]*)"/);
-      if (stringMatch) {
-        this.println(stringMatch[1]);
-      } else {
-        // Handle expression
-        this.println('[string]');
-      }
-      return false;
-    }
-    
-    // pl() - print line with parameter
-    if (funcName === 'pl') {
-      const stringMatch = argsStr.match(/"([^"]*)"/);
-      if (stringMatch) {
-        this.println(stringMatch[1]);
-      } else if (argsStr.trim() === '""') {
-        this.println();
-      } else {
-        // Handle expression
-        const value = this.evaluateExpression(argsStr);
-        this.println(value);
-      }
-      return false;
-    }
-    
-    // pn() - print number with parameter
-    if (funcName === 'pn') {
-      console.log(`[PN-FUNC] Evaluating argsStr: "${argsStr}"`);
-      const value = this.evaluateExpression(argsStr);
-      console.log(`[PN-FUNC] Result: ${value}`);
-      this.print(' ' + value);
-      return false;
-    }
-    
-    // gs() - get string input into array parameter
-    if (funcName === 'gs') {
-      // Extract array parameter name
-      const arrayParam = argsStr.trim();
-      
-      if (this.inputQueue.length > 0) {
-        const input = this.getInput();
-        this.print(input + '\n');
-        
-        // Store each character of the input string into the array
-        if (this.arrays[arrayParam]) {
-          for (let i = 0; i < input.length; i++) {
-            this.arrays[arrayParam][i] = input.charCodeAt(i);
-          }
-          // Null-terminate the string
-          this.arrays[arrayParam][input.length] = 0;
-        }
-        
-        // Return length of string
-        this.returnValue = input.length;
-        console.log('gs: stored', input, 'into', arrayParam, 'length:', input.length);
-        return false;
-      } else {
-        this.requestInput('');
-        return true;
-      }
-    }
-
+    // All other functions should be in the IPL or user code
     // Function not found - handle like original TinyC
     this.handleUndefinedFunction(funcName);
     return false;
@@ -1140,8 +1096,12 @@ export class TinyCInterpreter {
     // Check if this is an IPL function - if so, we'll need to switch to IPL lines
     const isIPLFunction = this.iplFunctions && this.iplFunctions[funcName];
     let savedLines = null;
+    let savedLineIndex = null;
     
-    console.log('[executeUserFunction] Executing', funcName, 'from lineIndex', this.lineIndex, 'loopState:', this.loopState ? JSON.stringify(this.loopState) : 'none');
+    // Only switch lines if we're not already using IPL lines
+    const needsLineSwitch = isIPLFunction && this.lines !== this.iplLines;
+    
+    console.log('[executeUserFunction] Executing', funcName, 'from lineIndex', this.lineIndex, 'loopState:', this.loopState ? JSON.stringify(this.loopState) : 'none', 'isIPL:', isIPLFunction, 'needsSwitch:', needsLineSwitch);
     
     // Special debugging for main function
     if (funcName === 'main') {
@@ -1220,6 +1180,9 @@ export class TinyCInterpreter {
         console.log('[executeUserFunction] While iteration', iterations, 'completed, checking condition');
         let conditionResult = this.evaluateCondition(condition);
         
+        // Get sameLineCode from saved state if it exists
+        const sameLineCode = savedState.sameLineCode || '';
+        
         // Continue the while loop
         while (conditionResult) {
           iterations++;
@@ -1232,6 +1195,37 @@ export class TinyCInterpreter {
           
           this.shouldBreak = false;
           this.shouldContinue = false;
+          
+          // Execute same-line code first if it exists
+          if (sameLineCode) {
+            console.log(`[WHILE-BODY] Iteration ${iterations} executing same-line code:`, sameLineCode.substring(0, 50));
+            const shouldWait = this.executeLine(sameLineCode);
+            if (shouldWait) {
+              // Save loop state for next resumption
+              this.loopState = {
+                type: 'while',
+                condition: condition,
+                loopStart: loopStart,
+                loopEnd: loopEnd,
+                iterations: iterations,
+                savedInLoop: savedInLoop,
+                sameLineCode: sameLineCode
+              };
+              this.inLoop = savedInLoop;
+              return true;
+            }
+            if (this.shouldReturn) {
+              this.lineIndex = loopEnd + 1;
+              this.inLoop = savedInLoop;
+              return false;
+            }
+            if (this.shouldBreak) break;
+            if (this.shouldContinue) {
+              // Re-evaluate condition for next iteration
+              conditionResult = this.evaluateCondition(condition);
+              continue;
+            }
+          }
           
           // Execute loop body from start
           this.lineIndex = loopStart;
@@ -1254,7 +1248,8 @@ export class TinyCInterpreter {
                 loopStart: loopStart,
                 loopEnd: loopEnd,
                 iterations: iterations,
-                savedInLoop: savedInLoop
+                savedInLoop: savedInLoop,
+                sameLineCode: sameLineCode
               };
               this.inLoop = savedInLoop;
               return true;
@@ -1301,25 +1296,23 @@ export class TinyCInterpreter {
       // Global variables persist, but function-local ones don't
       const savedGlobalVars = {};
       const savedGlobalArrays = {};
-      // Preserve only global declarations (from before main execution)
-      // For now, preserve z array and seed variable from trek.tc
+      //  Preserve all existing variables as globals (they were declared in outer scope)
+      // Only clear variables inside function scope
       for (const key in this.variables) {
-        if (['seed', 'a', 'b', 'c', 'd', 'e', 'f', 'g', 'h', 'i', 'j', 'k', 'l', 'm', 'n', 'o', 'p', 'q', 'r', 's', 't', 'u', 'v', 'w', 'x', 'y', 'cc'].includes(key)) {
-          savedGlobalVars[key] = this.variables[key];
-        }
+        savedGlobalVars[key] = this.variables[key];
       }
       for (const key in this.arrays) {
-        if (['z'].includes(key)) {
-          savedGlobalArrays[key] = this.arrays[key];
-        }
+        savedGlobalArrays[key] = this.arrays[key];
       }
       this.variables = { ...savedGlobalVars };
       this.arrays = { ...savedGlobalArrays };
       
       // Check if this is an IPL function - if so, switch to IPL lines
-      if (isIPLFunction) {
+      if (needsLineSwitch) {
         savedLines = this.lines;
+        savedLineIndex = this.lineIndex;
         this.lines = this.iplLines;
+        console.log('[executeUserFunction] Switched to IPL lines, saved lineIndex:', savedLineIndex);
       }
       
       this.currentFunction = funcName;
@@ -1329,7 +1322,7 @@ export class TinyCInterpreter {
       this.returnValue = null;
       
       // Parse function signature to get parameter names and types
-      const funcDefLine = isIPLFunction ? this.iplLines[func.startLine] : this.lines[func.startLine];
+      const funcDefLine = this.lines[func.startLine];
       if (!funcDefLine) {
         console.error(`Error: Function ${funcName} has startLine ${func.startLine} but no line exists there. Total lines: ${this.lines.length}, isIPL: ${isIPLFunction}`);
         this.handleUndefinedFunction(funcName);
@@ -1471,6 +1464,14 @@ export class TinyCInterpreter {
         return true;
       }
       
+      // Check if we just completed a pending return (MC call in return statement finished)
+      if (this.pendingReturn) {
+        console.log('[executeUserFunction] Pending return completed, popping return value from stack');
+        this.returnValue = this.pop();
+        this.shouldReturn = true;
+        this.pendingReturn = false;
+      }
+      
       // Check for return/break/continue BEFORE incrementing
       if (this.shouldReturn) {
         break;
@@ -1502,7 +1503,15 @@ export class TinyCInterpreter {
     } else {
       this.currentFunction = null;
       this.inFunction = false;
-      console.log(`[executeUserFunction] Function ${funcName} completed, no previous context`);
+      console.log(`[executeUserFunction] Function ${funcName} completed, no previous context, lineIndex=${this.lineIndex}`);
+      // When called from global scope, restore to user code lines  
+      if (isIPLFunction && savedLines) {
+        console.log(`[executeUserFunction] IPL function completed, switching back to user code lines`);
+        this.lines = savedLines;
+        this.lineIndex = savedLineIndex;
+        console.log(`[executeUserFunction] Restored lineIndex to ${this.lineIndex}, lines.length=${this.lines.length}`);
+        // The calling loop will increment it
+      }
     }
     this.shouldReturn = false;
     return false;
@@ -1546,6 +1555,12 @@ export class TinyCInterpreter {
     }
     
     let processed = expr.trim().replace(/[;\]]$/, '');
+    
+    // Handle string literals - return the string without quotes so it can be converted to char array
+    const stringMatch = processed.match(/^"([^"]*)"$/);
+    if (stringMatch) {
+      return stringMatch[1]; // Return the string content without quotes
+    }
     
     // Debug array expressions
     if (processed.includes('z(') && depth === 0) {
@@ -1913,6 +1928,16 @@ export class TinyCInterpreter {
   
   // Evaluate a condition expression
   evaluateCondition(condExpr) {
+    // Handle assignments in conditions (C-style: while(x = y) evaluates assignment then tests result)
+    const assignMatch = condExpr.match(/^(\w+)\s*=\s*(.+)$/);
+    if (assignMatch) {
+      const varName = assignMatch[1];
+      const expr = assignMatch[2];
+      const value = this.evaluateExpression(expr);
+      this.variables[varName] = value;
+      return Boolean(value);
+    }
+    
     const result = this.evaluateExpression(condExpr);
     return Boolean(result);
   }
@@ -2448,7 +2473,55 @@ export class TinyCInterpreter {
     
     // loopStart should be the first line INSIDE the loop, not the while statement itself
     let loopStart = this.lineIndex + 1;
-    let loopEnd = hasBracket ? this.findClosingBracket(this.lineIndex) : this.lineIndex;
+    // When finding the closing bracket, we need to account for the current line's content
+    // If the while is part of multi-line code (e.g., inside a function), we need to skip
+    // any brackets that appear before the while statement on the same logical line
+    // For now, when there's same-line code after '[', the loop body includes both
+    // the same-line code AND subsequent lines until we find the matching ']'
+    
+    // Find matching ']' for the while loop's '['
+    // Count brackets starting from the while statement's '[' position
+    let loopEnd;
+    if (hasBracket) {
+      let depth = 1;
+      let searchLine = this.lineIndex;
+      let searchPos = line.indexOf('[', startPos); // Find the '[' after the condition
+      
+      // Skip past the '[' we just found
+      searchPos++;
+      
+      // Search through the rest of this line first
+      while (searchPos < line.length && depth > 0) {
+        if (line[searchPos] === '[') depth++;
+        else if (line[searchPos] === ']') depth--;
+        searchPos++;
+      }
+      
+      // If we found the closing bracket on the same line
+      if (depth === 0) {
+        loopEnd = this.lineIndex;
+      } else {
+        // Continue searching subsequent lines
+        for (let i = searchLine + 1; i < this.lines.length && depth > 0; i++) {
+          const searchLineText = this.lines[i];
+          for (const char of searchLineText) {
+            if (char === '[') depth++;
+            else if (char === ']') depth--;
+            if (depth === 0) {
+              loopEnd = i;
+              break;
+            }
+          }
+        }
+      }
+      
+      if (!loopEnd) {
+        loopEnd = this.lines.length - 1;
+      }
+    } else {
+      loopEnd = this.lineIndex;
+    }
+    
     console.log('[executeWhile] loopStart:', loopStart, 'loopEnd:', loopEnd, 'condition:', condition);
     
     const savedInLoop = this.inLoop;
